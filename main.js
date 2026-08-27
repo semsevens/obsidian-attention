@@ -564,6 +564,8 @@ var AnnotationStore = class {
     this.index = index;
     this.cache = /* @__PURE__ */ new Map();
     this.listeners = [];
+    /** Paths with a warm already in flight, so a miss can't spawn a stampede. */
+    this.warming = /* @__PURE__ */ new Set();
   }
   /** Annotations for a file, from cache when we have it. */
   async get(targetPath) {
@@ -574,10 +576,23 @@ var AnnotationStore = class {
     this.cache.set(targetPath, loaded);
     return loaded;
   }
-  /** Synchronous peek for render paths that can't await. Empty if not loaded. */
+  /**
+   * Synchronous read for render paths that can't await.
+   *
+   * A miss means a view is painting a file nobody has loaded yet — which used
+   * to render as "this file has no annotations" and stay that way. So a miss
+   * kicks off a load and notifies when it lands, turning a silent wrong answer
+   * into a brief empty one.
+   */
   peek(targetPath) {
-    var _a, _b;
-    return (_b = (_a = this.cache.get(targetPath)) == null ? void 0 : _a.annotations) != null ? _b : [];
+    const cached = this.cache.get(targetPath);
+    if (cached)
+      return cached.annotations;
+    if (!this.warming.has(targetPath)) {
+      this.warming.add(targetPath);
+      void this.get(targetPath).then(() => this.emit(targetPath)).finally(() => this.warming.delete(targetPath));
+    }
+    return [];
   }
   /** Load into the cache so a later peek() has something to paint. */
   async warm(targetPath) {
@@ -1180,7 +1195,7 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
         void this.onFileOpen(file);
     }));
     this.app.workspace.onLayoutReady(() => {
-      void this.rebuildIndex();
+      void this.onLayoutReady();
     });
     this.addRibbonIcon("highlighter", "Attention", () => {
       void this.openReview();
@@ -1203,6 +1218,19 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
   /** Mark style is a body class, so switching it needs no repaint. */
   applyMarkStyle() {
     document.body.toggleClass("at-style-background", this.settings.markStyle === "background");
+  }
+  async onLayoutReady() {
+    await this.rebuildIndex();
+    await this.warmOpenFiles();
+  }
+  async warmOpenFiles() {
+    const paths = /* @__PURE__ */ new Set();
+    this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
+      const file = leaf.view instanceof import_obsidian8.MarkdownView ? leaf.view.file : null;
+      if (file)
+        paths.add(file.path);
+    });
+    await Promise.all([...paths].map((p) => this.store.warm(p)));
   }
   async onFileOpen(file) {
     await this.store.warm(file.path);

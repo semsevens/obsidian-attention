@@ -19,6 +19,8 @@ type Listener = (targetPath: string) => void;
 export class AnnotationStore {
   private cache = new Map<string, AnnotationFile>();
   private listeners: Listener[] = [];
+  /** Paths with a warm already in flight, so a miss can't spawn a stampede. */
+  private warming = new Set<string>();
 
   constructor(private app: App, private index: AttentionIndex) {}
 
@@ -31,9 +33,24 @@ export class AnnotationStore {
     return loaded;
   }
 
-  /** Synchronous peek for render paths that can't await. Empty if not loaded. */
+  /**
+   * Synchronous read for render paths that can't await.
+   *
+   * A miss means a view is painting a file nobody has loaded yet — which used
+   * to render as "this file has no annotations" and stay that way. So a miss
+   * kicks off a load and notifies when it lands, turning a silent wrong answer
+   * into a brief empty one.
+   */
   peek(targetPath: string): readonly Annotation[] {
-    return this.cache.get(targetPath)?.annotations ?? [];
+    const cached = this.cache.get(targetPath);
+    if (cached) return cached.annotations;
+    if (!this.warming.has(targetPath)) {
+      this.warming.add(targetPath);
+      void this.get(targetPath)
+        .then(() => this.emit(targetPath))
+        .finally(() => this.warming.delete(targetPath));
+    }
+    return [];
   }
 
   /** Load into the cache so a later peek() has something to paint. */

@@ -47,7 +47,7 @@ export default class AttentionPlugin extends Plugin {
 
     // Scanning every sidecar touches the whole file list, so wait until the
     // vault has finished indexing rather than fighting it during startup.
-    this.app.workspace.onLayoutReady(() => { void this.rebuildIndex(); });
+    this.app.workspace.onLayoutReady(() => { void this.onLayoutReady(); });
 
     this.addRibbonIcon('highlighter', 'Attention', () => { void this.openReview(); });
 
@@ -71,6 +71,23 @@ export default class AttentionPlugin extends Plugin {
   /** Mark style is a body class, so switching it needs no repaint. */
   applyMarkStyle(): void {
     document.body.toggleClass('at-style-background', this.settings.markStyle === 'background');
+  }
+
+  private async onLayoutReady(): Promise<void> {
+    await this.rebuildIndex();
+    // Notes open at load time never fire `file-open`, so without this their
+    // highlights stay unpainted until you switch away and back — which is
+    // exactly what happens on every hot reload.
+    await this.warmOpenFiles();
+  }
+
+  private async warmOpenFiles(): Promise<void> {
+    const paths = new Set<string>();
+    this.app.workspace.getLeavesOfType('markdown').forEach(leaf => {
+      const file = leaf.view instanceof MarkdownView ? leaf.view.file : null;
+      if (file) paths.add(file.path);
+    });
+    await Promise.all([...paths].map(p => this.store.warm(p)));
   }
 
   private async onFileOpen(file: TFile): Promise<void> {
