@@ -1,0 +1,94 @@
+/* ── Review panel ──────────────────────────────────────────────────────────── */
+
+.at-review {
+  padding: 0 12px 40px;
+}
+
+.at-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  position: sticky;
+  top: 0;
+  background: var(--background-secondary);
+  z-index: 1;
+}
+
+.at-review-total {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+
+.at-btn {
+  font-size: var(--font-ui-smaller);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.at-bucket-title {
+  font-size: var(--font-ui-smaller);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+  margin: 16px 0 6px;
+}
+
+/* One marked passage. The colour of the stripe is the highlight colour. */
+.at-entry {
+  border-left: 3px solid var(--at-color, var(--text-accent));
+  padding: 6px 0 6px 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  border-radius: 0 4px 4px 0;
+}
+
+.at-entry:hover {
+  background: var(--background-modifier-hover);
+}
+
+.at-quote {
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  color: var(--text-normal);
+}
+
+.at-body {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-top: 4px;
+  padding-left: 8px;
+  border-left: 2px solid var(--background-modifier-border);
+}
+
+.at-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+.at-time {
+  font-variant-numeric: tabular-nums;
+}
+
+.at-empty {
+  color: var(--text-faint);
+  font-size: var(--font-ui-small);
+  padding: 24px 0;
+  line-height: 1.6;
+}
+
+/* ── Highlights painted onto a host surface ────────────────────────────────── */
+
+.at-hl {
+  background: var(--at-color, #f5c542);
+  border-radius: 2px;
+  box-decoration-break: clone;
+}
+
+.at-hl-comment {
+  border-bottom: 2px solid var(--at-color, #f5c542);
+}

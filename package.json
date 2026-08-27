@@ -1,0 +1,20 @@
+{
+  "name": "obsidian-attention",
+  "version": "0.1.0",
+  "description": "Obsidian plugin: record and revisit your attention",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit --skipLibCheck"
+  },
+  "author": "semsevens",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^16.11.6",
+    "esbuild": "0.17.3",
+    "obsidian": "latest",
+    "tslib": "2.4.0",
+    "typescript": "^7.0.2"
+  }
+}

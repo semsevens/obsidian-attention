@@ -1,0 +1,119 @@
+import { App, PluginSettingTab, Setting } from 'obsidian';
+import type AttentionPlugin from './main';
+
+export interface AttentionSettings {
+  /** Highlight colours offered in the capture popover. */
+  colors: string[];
+  defaultColor: string;
+
+  /** Annotate markdown files (needs the CodeMirror layer). */
+  enableMarkdownHost: boolean;
+  /** Annotate the Media Transcript plugin's transcript panel. */
+  enableTranscriptHost: boolean;
+
+  /**
+   * Count how often a transcript segment gets replayed. Implicit attention —
+   * denser than highlights but more personal, so it's off unless asked for.
+   */
+  trackReplays: boolean;
+
+  /** How many annotations the review view resurfaces at a time. */
+  resurfaceCount: number;
+
+  /** Keep the sidecar when its target file is deleted (recoverable mistakes). */
+  keepOrphanedSidecars: boolean;
+}
+
+export const DEFAULT_SETTINGS: AttentionSettings = {
+  colors: ['#f5c542', '#7ec96b', '#63b3ed', '#e879a6', '#b794f4'],
+  defaultColor: '#f5c542',
+  enableMarkdownHost: true,
+  enableTranscriptHost: true,
+  trackReplays: false,
+  resurfaceCount: 10,
+  keepOrphanedSidecars: true,
+};
+
+export class AttentionSettingTab extends PluginSettingTab {
+  constructor(app: App, private plugin: AttentionPlugin) {
+    super(app, plugin);
+  }
+
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    new Setting(containerEl).setName('Where to annotate').setHeading();
+
+    new Setting(containerEl)
+      .setName('Markdown notes')
+      .setDesc('Highlight and comment inside notes. The note itself is never modified.')
+      .addToggle(t =>
+        t.setValue(this.plugin.settings.enableMarkdownHost).onChange(async v => {
+          this.plugin.settings.enableMarkdownHost = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Transcripts')
+      .setDesc(
+        'Highlight and comment on transcript lines in the Media Transcript plugin. ' +
+          'Has no effect if that plugin is not installed.',
+      )
+      .addToggle(t =>
+        t.setValue(this.plugin.settings.enableTranscriptHost).onChange(async v => {
+          this.plugin.settings.enableTranscriptHost = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl).setName('Review').setHeading();
+
+    new Setting(containerEl)
+      .setName('Resurface count')
+      .setDesc('How many annotations to bring back at a time, preferring ones you have not revisited.')
+      .addSlider(s =>
+        s.setLimits(3, 50, 1)
+          .setValue(this.plugin.settings.resurfaceCount)
+          .onChange(async v => {
+            this.plugin.settings.resurfaceCount = v;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl).setName('Advanced').setHeading();
+
+    new Setting(containerEl)
+      .setName('Count replays')
+      .setDesc(
+        'Record how often you replay a transcript segment. A weaker signal than a highlight, ' +
+          'but a much denser one — useful for spotting what actually held your attention.',
+      )
+      .addToggle(t =>
+        t.setValue(this.plugin.settings.trackReplays).onChange(async v => {
+          this.plugin.settings.trackReplays = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Keep annotations when a file is deleted')
+      .setDesc('Leaves the .anno.json behind so annotations survive an accidental delete.')
+      .addToggle(t =>
+        t.setValue(this.plugin.settings.keepOrphanedSidecars).onChange(async v => {
+          this.plugin.settings.keepOrphanedSidecars = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Rebuild index')
+      .setDesc('Rescan every sidecar in the vault. Safe to run any time — the index is derived data.')
+      .addButton(b =>
+        b.setButtonText('Rebuild').onClick(async () => {
+          await this.plugin.rebuildIndex();
+        }),
+      );
+  }
+}
