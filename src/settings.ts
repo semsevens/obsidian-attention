@@ -6,6 +6,14 @@ export interface AttentionSettings {
   colors: string[];
   defaultColor: string;
 
+  /**
+   * How a mark is drawn. Underline by default: marks are meant to be many, a
+   * page full of filled blocks is unreadable, and a background fill looks
+   * exactly like Obsidian's own ==highlight== — the one thing that most needs
+   * telling apart, since that syntax lives in the note and these don't.
+   */
+  markStyle: 'underline' | 'background';
+
   /** Annotate markdown files (needs the CodeMirror layer). */
   enableMarkdownHost: boolean;
   /** Annotate the Media Transcript plugin's transcript panel. */
@@ -27,6 +35,7 @@ export interface AttentionSettings {
 export const DEFAULT_SETTINGS: AttentionSettings = {
   colors: ['#f5c542', '#7ec96b', '#63b3ed', '#e879a6', '#b794f4'],
   defaultColor: '#f5c542',
+  markStyle: 'underline',
   enableMarkdownHost: true,
   enableTranscriptHost: true,
   trackReplays: false,
@@ -66,6 +75,25 @@ export class AttentionSettingTab extends PluginSettingTab {
           this.plugin.settings.enableTranscriptHost = v;
           await this.plugin.saveSettings();
         }),
+      );
+
+    new Setting(containerEl)
+      .setName('Mark style')
+      .setDesc(
+        'How highlights are drawn. Underline keeps a heavily-marked note readable and ' +
+          "is easy to tell apart from Obsidian's own ==highlight== syntax. Annotations " +
+          'carrying a comment always get a little more weight.',
+      )
+      .addDropdown(d =>
+        d
+          .addOption('underline', 'Underline')
+          .addOption('background', 'Background')
+          .setValue(this.plugin.settings.markStyle)
+          .onChange(async v => {
+            this.plugin.settings.markStyle = v as 'underline' | 'background';
+            await this.plugin.saveSettings();
+            this.plugin.applyMarkStyle();
+          }),
       );
 
     new Setting(containerEl).setName('Review').setHeading();

@@ -19,11 +19,24 @@ Right-click a selection in a note:
 - **Highlight in colour…** — pick from the palette
 - **Comment…** — write a note against the passage (⌘/Ctrl+Enter saves)
 
-Right-click an existing highlight to edit its comment, change its colour, or
-remove it. In editing modes these are appended to Obsidian's own context menu;
+Click a highlight to read its comment; right-click it to edit, recolour or
+remove. In editing modes these are appended to Obsidian's own context menu;
 reading mode gets its own, raised only when there is something to offer.
 
 The ribbon's highlighter icon opens the review panel.
+
+## Versus `==highlight==`
+
+Obsidian's own highlight is markdown syntax living in the note. That makes it
+sturdier than anything here — it cannot lose its anchor, because it *is* the
+text — and it travels to any markdown tool. What it can't do is carry a comment,
+a colour, or a date, or tell you what you marked last week; and it edits the file
+to exist at all.
+
+Marks are drawn as an underline by default. They are meant to be many, a page of
+filled blocks is unreadable, and a background fill looks exactly like
+`==highlight==` — the one thing worth telling apart. Annotations carrying a
+comment get a little more weight. Switch to a background fill in settings.
 
 ## Status
 

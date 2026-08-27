@@ -3,6 +3,7 @@ import { Annotation, MarkdownAnchor, newId } from '../../model';
 import { describe, nthOccurrence, countOccurrences } from '../../anchor/textQuote';
 import { AnnotationStore } from '../../store/annotationStore';
 import { SelectionPopover } from '../../ui/SelectionPopover';
+import { CommentBubble } from '../../ui/CommentBubble';
 import { CommentModal } from '../../ui/CommentModal';
 import { AttentionSettings } from '../../settings';
 
@@ -22,6 +23,7 @@ import { AttentionSettings } from '../../settings';
  */
 export class MarkdownHost {
   private popover: SelectionPopover;
+  private bubble = new CommentBubble();
   /** The element right-clicked, captured before any menu is built. */
   private lastTarget: HTMLElement | null = null;
 
@@ -51,6 +53,16 @@ export class MarkdownHost {
       }),
     );
 
+    // Left-click a highlight to read its comment. Guarded on an empty
+    // selection so click-dragging across a highlight still just selects text.
+    this.plugin.registerDomEvent(document, 'click', e => {
+      const hit = e.target instanceof HTMLElement ? e.target.closest('.at-hl') : null;
+      if (!(hit instanceof HTMLElement)) return;
+      if ((window.getSelection()?.toString().trim().length ?? 0) > 0) return;
+      const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+      if (file) void this.showBubble(file, hit);
+    });
+
     // Reading mode fires no editor-menu, so it needs its own handler. Only
     // intercept when there is actually something to offer.
     this.plugin.registerDomEvent(document, 'contextmenu', e => {
@@ -64,6 +76,26 @@ export class MarkdownHost {
 
   detach(): void {
     this.popover.hide();
+    this.bubble.hide();
+  }
+
+  private async showBubble(file: TFile, el: HTMLElement): Promise<void> {
+    const id = el.dataset.atId;
+    if (!id) return;
+    const data = await this.store.get(file.path);
+    const annotation = data.annotations.find(a => a.id === id);
+    if (!annotation) return;
+
+    this.bubble.showFor(el.getBoundingClientRect(), annotation.body, {
+      onEdit: () => { void this.editComment(file, id); },
+      onRecolour: () => {
+        this.popover.showAt(el.getBoundingClientRect(), {
+          onHighlight: color => { void this.store.update(file.path, id, { color }); },
+          onComment: () => { void this.editComment(file, id); },
+        });
+      },
+      onRemove: () => { void this.store.remove(file.path, id); },
+    });
   }
 
   private hasSomethingToOffer(view: MarkdownView): boolean {

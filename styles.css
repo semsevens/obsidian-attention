@@ -83,14 +83,88 @@
 
 /* ── Highlights painted onto a host surface ────────────────────────────────── */
 
+/* Default: an underline. Marks are meant to be many, and a filled block both
+   drowns the page and looks like Obsidian's own ==highlight== — which lives in
+   the note, unlike these. An underline also leaves the selection layer alone. */
 .at-hl {
-  background: var(--at-color, #f5c542);
+  box-shadow: inset 0 -0.18em 0 0 var(--at-color, #f5c542);
+  cursor: pointer;
+  transition: box-shadow 120ms ease;
+}
+
+.at-hl:hover {
+  box-shadow: inset 0 -0.32em 0 0 var(--at-color, #f5c542);
+}
+
+/* An annotation you wrote something about earns more weight than a bare mark. */
+.at-hl-comment {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 18%, transparent);
   border-radius: 2px;
   box-decoration-break: clone;
 }
 
-.at-hl-comment {
-  border-bottom: 2px solid var(--at-color, #f5c542);
+/* Opt-in fill. Translucent on purpose: an opaque background sits on top of the
+   browser's selection colour, which is painted behind the text, so with a solid
+   fill the text still selects — it just doesn't *look* selected. */
+body.at-style-background .at-hl {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 42%, transparent);
+  border-radius: 2px;
+  box-decoration-break: clone;
+  box-shadow: none;
+}
+
+body.at-style-background .at-hl:hover {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 62%, transparent);
+  box-shadow: none;
+}
+
+/* Make selection unmistakable either way. */
+.at-hl::selection {
+  background: var(--text-selection);
+}
+
+/* ── Comment bubble (clicking a highlight) ─────────────────────────────────── */
+
+.at-bubble {
+  position: fixed;
+  z-index: var(--layer-popover);
+  max-width: 320px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: var(--shadow-s);
+}
+
+.at-bubble-body {
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+  color: var(--text-normal);
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.at-bubble-empty {
+  font-size: var(--font-ui-small);
+  color: var(--text-faint);
+  font-style: italic;
+  margin-bottom: 8px;
+}
+
+.at-bubble-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* Briefly ring an annotation the review panel jumped to. */
+@keyframes at-flash {
+  from { box-shadow: 0 0 0 3px var(--text-accent); }
+  to   { box-shadow: 0 0 0 3px transparent; }
+}
+
+.at-flash {
+  animation: at-flash 1.2s ease-out;
+  border-radius: 3px;
 }
 
 /* ── Selection popover ─────────────────────────────────────────────────────── */

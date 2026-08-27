@@ -27,6 +27,8 @@ export default class AttentionPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE_REVIEW, leaf => new ReviewView(leaf, this));
 
+    this.applyMarkStyle();
+
     if (this.settings.enableMarkdownHost) this.setupMarkdownHost();
 
     // A change to any annotation has to reach both rendering paths and the
@@ -64,6 +66,11 @@ export default class AttentionPlugin extends Plugin {
     }));
 
     this.addSettingTab(new AttentionSettingTab(this.app, this));
+  }
+
+  /** Mark style is a body class, so switching it needs no repaint. */
+  applyMarkStyle(): void {
+    document.body.toggleClass('at-style-background', this.settings.markStyle === 'background');
   }
 
   private setupMarkdownHost(): void {
@@ -162,6 +169,7 @@ export default class AttentionPlugin extends Plugin {
 
   onunload() {
     this.markdownHost?.detach();
+    document.body.removeClass('at-style-background');
   }
 
   async loadSettings() {

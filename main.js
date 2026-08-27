@@ -34,6 +34,7 @@ var import_obsidian = require("obsidian");
 var DEFAULT_SETTINGS = {
   colors: ["#f5c542", "#7ec96b", "#63b3ed", "#e879a6", "#b794f4"],
   defaultColor: "#f5c542",
+  markStyle: "underline",
   enableMarkdownHost: true,
   enableTranscriptHost: true,
   trackReplays: false,
@@ -61,6 +62,15 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
       (t) => t.setValue(this.plugin.settings.enableTranscriptHost).onChange(async (v) => {
         this.plugin.settings.enableTranscriptHost = v;
         await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Mark style").setDesc(
+      "How highlights are drawn. Underline keeps a heavily-marked note readable and is easy to tell apart from Obsidian's own ==highlight== syntax. Annotations carrying a comment always get a little more weight."
+    ).addDropdown(
+      (d) => d.addOption("underline", "Underline").addOption("background", "Background").setValue(this.plugin.settings.markStyle).onChange(async (v) => {
+        this.plugin.settings.markStyle = v;
+        await this.plugin.saveSettings();
+        this.plugin.applyMarkStyle();
       })
     );
     new import_obsidian.Setting(containerEl).setName("Review").setHeading();
@@ -550,6 +560,63 @@ var SelectionPopover = class {
   }
 };
 
+// src/ui/CommentBubble.ts
+var CommentBubble = class {
+  constructor() {
+    this.el = null;
+    this.dismiss = (e) => {
+      var _a;
+      if (e.target instanceof Node && ((_a = this.el) == null ? void 0 : _a.contains(e.target)))
+        return;
+      this.hide();
+    };
+  }
+  showFor(rect, body, actions) {
+    this.hide();
+    const el = document.createElement("div");
+    el.className = "at-bubble";
+    if (body && body.trim().length > 0) {
+      el.createDiv("at-bubble-body").setText(body);
+    } else {
+      el.createDiv("at-bubble-empty").setText("No comment yet.");
+    }
+    const row = el.createDiv("at-bubble-actions");
+    const add = (label, fn, warn = false) => {
+      const b = row.createEl("button", { cls: "at-pop-btn", text: label });
+      if (warn)
+        b.addClass("mod-warning");
+      b.addEventListener("click", () => {
+        fn();
+        this.hide();
+      });
+    };
+    add(body ? "Edit" : "Comment", actions.onEdit);
+    add("Colour", actions.onRecolour);
+    add("Remove", actions.onRemove, true);
+    document.body.appendChild(el);
+    this.el = el;
+    const { width, height } = el.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(8, rect.left + rect.width / 2 - width / 2),
+      window.innerWidth - width - 8
+    );
+    const above = rect.top - height - 8;
+    el.style.left = `${left}px`;
+    el.style.top = `${above < 8 ? rect.bottom + 8 : above}px`;
+    window.setTimeout(() => {
+      document.addEventListener("mousedown", this.dismiss);
+      document.addEventListener("keydown", this.dismiss);
+    }, 0);
+  }
+  hide() {
+    var _a;
+    document.removeEventListener("mousedown", this.dismiss);
+    document.removeEventListener("keydown", this.dismiss);
+    (_a = this.el) == null ? void 0 : _a.remove();
+    this.el = null;
+  }
+};
+
 // src/ui/CommentModal.ts
 var import_obsidian4 = require("obsidian");
 var CommentModal = class extends import_obsidian4.Modal {
@@ -596,6 +663,7 @@ var MarkdownHost = class {
     this.plugin = plugin;
     this.store = store;
     this.settings = settings;
+    this.bubble = new CommentBubble();
     /** The element right-clicked, captured before any menu is built. */
     this.lastTarget = null;
     this.popover = new SelectionPopover(settings.colors);
@@ -614,6 +682,17 @@ var MarkdownHost = class {
         this.onEditorMenu(menu, editor, info);
       })
     );
+    this.plugin.registerDomEvent(document, "click", (e) => {
+      var _a, _b, _c;
+      const hit = e.target instanceof HTMLElement ? e.target.closest(".at-hl") : null;
+      if (!(hit instanceof HTMLElement))
+        return;
+      if (((_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim().length) != null ? _b : 0) > 0)
+        return;
+      const file = (_c = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView)) == null ? void 0 : _c.file;
+      if (file)
+        void this.showBubble(file, hit);
+    });
     this.plugin.registerDomEvent(document, "contextmenu", (e) => {
       const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
       if (!(view == null ? void 0 : view.file) || view.getMode() !== "preview")
@@ -626,6 +705,34 @@ var MarkdownHost = class {
   }
   detach() {
     this.popover.hide();
+    this.bubble.hide();
+  }
+  async showBubble(file, el) {
+    const id = el.dataset.atId;
+    if (!id)
+      return;
+    const data = await this.store.get(file.path);
+    const annotation = data.annotations.find((a) => a.id === id);
+    if (!annotation)
+      return;
+    this.bubble.showFor(el.getBoundingClientRect(), annotation.body, {
+      onEdit: () => {
+        void this.editComment(file, id);
+      },
+      onRecolour: () => {
+        this.popover.showAt(el.getBoundingClientRect(), {
+          onHighlight: (color) => {
+            void this.store.update(file.path, id, { color });
+          },
+          onComment: () => {
+            void this.editComment(file, id);
+          }
+        });
+      },
+      onRemove: () => {
+        void this.store.remove(file.path, id);
+      }
+    });
   }
   hasSomethingToOffer(view) {
     var _a, _b, _c;
@@ -890,6 +997,7 @@ var AttentionPlugin = class extends import_obsidian7.Plugin {
     this.index = new AttentionIndex(this.app);
     this.store = new AnnotationStore(this.app, this.index);
     this.registerView(VIEW_TYPE_REVIEW, (leaf) => new ReviewView(leaf, this));
+    this.applyMarkStyle();
     if (this.settings.enableMarkdownHost)
       this.setupMarkdownHost();
     this.register(this.store.onChange(() => {
@@ -921,6 +1029,10 @@ var AttentionPlugin = class extends import_obsidian7.Plugin {
       void this.handleDelete(file);
     }));
     this.addSettingTab(new AttentionSettingTab(this.app, this));
+  }
+  /** Mark style is a body class, so switching it needs no repaint. */
+  applyMarkStyle() {
+    document.body.toggleClass("at-style-background", this.settings.markStyle === "background");
   }
   setupMarkdownHost() {
     const provider = (path) => this.store.peek(path);
@@ -1010,6 +1122,7 @@ var AttentionPlugin = class extends import_obsidian7.Plugin {
   onunload() {
     var _a;
     (_a = this.markdownHost) == null ? void 0 : _a.detach();
+    document.body.removeClass("at-style-background");
   }
   async loadSettings() {
     const saved = await this.loadData();
