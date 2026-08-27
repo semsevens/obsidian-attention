@@ -36,19 +36,54 @@ export type Anchor = TranscriptAnchor | MarkdownAnchor;
 export interface Annotation {
   id: string;
   anchor: Anchor;
-  color: string;
-  /** null = a plain highlight. A string = a comment (which also highlights). */
+
+  /**
+   * Every time this passage caught you, oldest first.
+   *
+   * A line can move you more than once, months apart, and that is not a
+   * duplicate to be cleaned up — it is the strongest signal this plugin
+   * records. Marking something already marked appends here rather than
+   * creating a second annotation, so the length is how many times it landed.
+   */
+  hits: string[];
+
+  /** null = a plain mark. A string = a comment (which also marks). */
   body: string | null;
-  /** ISO timestamps. */
-  created: string;
   updated?: string;
+
   /** Every time this annotation resurfaced in a review, oldest first. */
   reviewed: string[];
+
   /**
    * How many times this spot was replayed (transcript only, opt-in).
-   * Implicit attention: weaker than a highlight, but far denser.
+   * Implicit attention: weaker than a mark, but far denser.
    */
   replays?: number;
+
+  /** Written by versions before marks shared one configurable colour. */
+  color?: string;
+}
+
+/** When this passage first caught you. */
+export function firstMarked(a: Annotation): string {
+  return a.hits[0] ?? '';
+}
+
+/** The most recent time it caught you — what "marked this week" should mean. */
+export function lastMarked(a: Annotation): string {
+  return a.hits[a.hits.length - 1] ?? '';
+}
+
+/**
+ * Bring an annotation written by an older version up to date.
+ *
+ * Applied on read rather than by migrating files: a sidecar someone edited or
+ * synced from an older install shouldn't need a separate upgrade step.
+ */
+export function normalize(raw: Annotation & { created?: string }): Annotation {
+  if (Array.isArray(raw.hits) && raw.hits.length > 0) return raw;
+  const created = raw.created ?? new Date().toISOString();
+  return { ...raw, hits: [created] };
 }
 
 /** The shape of a `<file>.anno.json` sidecar. */
@@ -70,4 +105,18 @@ export function newId(): string {
 
 export function isComment(a: Annotation): boolean {
   return a.body !== null && a.body.trim().length > 0;
+}
+
+/** Do these two anchors point at the same passage? */
+export function sameSpot(a: Anchor, b: Anchor): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.quote !== b.quote) return false;
+  if (a.kind === 'markdown' && b.kind === 'markdown') {
+    // Overlap rather than equality: offsets drift as the file is edited.
+    return a.from < b.to && b.from < a.to;
+  }
+  if (a.kind === 'transcript' && b.kind === 'transcript') {
+    return a.seg === b.seg || Math.abs(a.start - b.start) < 0.5;
+  }
+  return false;
 }

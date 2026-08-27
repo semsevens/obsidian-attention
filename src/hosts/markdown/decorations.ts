@@ -37,7 +37,7 @@ function build(view: EditorView, provider: Provider): DecorationSet {
     ranges.push(
       Decoration.mark({
         class: isComment(a) ? 'at-hl at-hl-comment' : 'at-hl',
-        attributes: { style: `--at-color: ${a.color}`, 'data-at-id': a.id },
+        attributes: { 'data-at-id': a.id },
       }).range(at.from, at.to),
     );
   }

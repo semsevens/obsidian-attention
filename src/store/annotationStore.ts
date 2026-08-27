@@ -1,5 +1,5 @@
 import { App } from 'obsidian';
-import { Annotation, AnnotationFile } from '../model';
+import { Annotation, AnnotationFile, Anchor, newId, sameSpot } from '../model';
 import { loadSidecar, saveSidecar } from './sidecar';
 import { AttentionIndex } from './attentionIndex';
 
@@ -59,6 +59,47 @@ export class AnnotationStore {
     this.emit(targetPath);
   }
 
+  /**
+   * Record that a passage caught you.
+   *
+   * Marking something already marked appends to its history instead of making a
+   * second annotation. A line that moves you three times over a year is the
+   * strongest thing this plugin can know about you, and deduplicating it away
+   * would throw exactly that away.
+   *
+   * Returns the annotation and whether this was a fresh mark or a repeat, so
+   * the caller can say so.
+   */
+  async mark(
+    targetPath: string,
+    anchor: Anchor,
+    body: string | null,
+  ): Promise<{ annotation: Annotation; repeat: boolean }> {
+    const data = await this.get(targetPath);
+    const now = new Date().toISOString();
+
+    const existing = data.annotations.find(a => sameSpot(a.anchor, anchor));
+    if (existing) {
+      existing.hits.push(now);
+      // A comment added on a repeat shouldn't silently drop an earlier one.
+      if (body) existing.body = existing.body ? `${existing.body}\n\n${body}` : body;
+      existing.updated = now;
+      await this.commit(targetPath, data);
+      return { annotation: existing, repeat: true };
+    }
+
+    const annotation: Annotation = {
+      id: newId(),
+      anchor,
+      hits: [now],
+      body,
+      reviewed: [],
+    };
+    data.annotations.push(annotation);
+    await this.commit(targetPath, data);
+    return { annotation, repeat: false };
+  }
+
   async add(targetPath: string, annotation: Annotation): Promise<void> {
     const data = await this.get(targetPath);
     data.annotations.push(annotation);
@@ -68,7 +109,7 @@ export class AnnotationStore {
   async update(
     targetPath: string,
     id: string,
-    patch: Partial<Pick<Annotation, 'body' | 'color' | 'anchor'>>,
+    patch: Partial<Pick<Annotation, 'body' | 'anchor'>>,
   ): Promise<void> {
     const data = await this.get(targetPath);
     const target = data.annotations.find(a => a.id === id);

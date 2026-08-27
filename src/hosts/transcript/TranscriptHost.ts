@@ -1,5 +1,5 @@
 import { App, Menu, Notice, Plugin } from 'obsidian';
-import { Annotation, TranscriptAnchor, newId } from '../../model';
+import { TranscriptAnchor } from '../../model';
 import { Seg, describeTranscript, resolveTranscript } from '../../anchor/transcriptAnchor';
 import { AnnotationStore } from '../../store/annotationStore';
 import { SelectionPopover } from '../../ui/SelectionPopover';
@@ -32,7 +32,7 @@ export class TranscriptHost {
     private store: AnnotationStore,
     private settings: AttentionSettings,
   ) {
-    this.popover = new SelectionPopover(settings.colors);
+    this.popover = new SelectionPopover();
   }
 
   register(): void {
@@ -196,10 +196,10 @@ export class TranscriptHost {
     if (!selection || selection.rangeCount === 0) return;
 
     this.popover.showAt(selection.getRangeAt(0).getBoundingClientRect(), {
-      onHighlight: color => { void this.create(captured.mediaPath, captured.anchor, color, null); },
+      onMark: () => { void this.mark(captured.mediaPath, captured.anchor, null); },
       onComment: () => {
         new CommentModal(this.app, captured.anchor.quote, '', body => {
-          void this.create(captured.mediaPath, captured.anchor, this.settings.defaultColor, body || null);
+          void this.mark(captured.mediaPath, captured.anchor, body || null);
         }).open();
       },
     });
@@ -214,22 +214,16 @@ export class TranscriptHost {
       if (!mediaPath || !id) return;
       menu.addItem(i => i.setTitle('Edit comment…').setIcon('message-square')
         .onClick(() => { void this.editComment(mediaPath, id); }));
-      menu.addItem(i => i.setTitle('Change colour…').setIcon('palette').onClick(() => {
-        this.popover.showAt(hit.getBoundingClientRect(), {
-          onHighlight: color => { void this.store.update(mediaPath, id, { color }); },
-          onComment: () => { void this.editComment(mediaPath, id); },
-        });
-      }));
-      menu.addItem(i => i.setTitle('Remove highlight').setIcon('trash').setWarning(true)
+      menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
         .onClick(() => { void this.store.remove(mediaPath, id); }));
     } else {
       const captured = this.capture();
       if (!captured) return;
-      menu.addItem(i => i.setTitle('Highlight').setIcon('highlighter')
-        .onClick(() => { void this.create(captured.mediaPath, captured.anchor, this.settings.defaultColor, null); }));
+      menu.addItem(i => i.setTitle('Mark').setIcon('highlighter')
+        .onClick(() => { void this.mark(captured.mediaPath, captured.anchor, null); }));
       menu.addItem(i => i.setTitle('Comment…').setIcon('message-square').onClick(() => {
         new CommentModal(this.app, captured.anchor.quote, '', body => {
-          void this.create(captured.mediaPath, captured.anchor, this.settings.defaultColor, body || null);
+          void this.mark(captured.mediaPath, captured.anchor, body || null);
         }).open();
       }));
     }
@@ -246,14 +240,9 @@ export class TranscriptHost {
     const annotation = data.annotations.find(a => a.id === id);
     if (!annotation) return;
 
-    this.bubble.showFor(el.getBoundingClientRect(), annotation.body, {
+    this.bubble.showFor(el.getBoundingClientRect(), annotation, {
       onEdit: () => { void this.editComment(mediaPath, id); },
-      onRecolour: () => {
-        this.popover.showAt(el.getBoundingClientRect(), {
-          onHighlight: color => { void this.store.update(mediaPath, id, { color }); },
-          onComment: () => { void this.editComment(mediaPath, id); },
-        });
-      },
+      onMarkAgain: () => { void this.mark(mediaPath, annotation.anchor as TranscriptAnchor, null); },
       onRemove: () => { void this.store.remove(mediaPath, id); },
     });
   }
@@ -267,20 +256,8 @@ export class TranscriptHost {
     }).open();
   }
 
-  private async create(
-    mediaPath: string,
-    anchor: TranscriptAnchor,
-    color: string,
-    body: string | null,
-  ): Promise<void> {
-    const annotation: Annotation = {
-      id: newId(),
-      anchor,
-      color,
-      body,
-      created: new Date().toISOString(),
-      reviewed: [],
-    };
-    await this.store.add(mediaPath, annotation);
+  private async mark(mediaPath: string, anchor: TranscriptAnchor, body: string | null): Promise<void> {
+    const { repeat, annotation } = await this.store.mark(mediaPath, anchor, body);
+    if (repeat) new Notice(`Marked ${annotation.hits.length}× now`);
   }
 }

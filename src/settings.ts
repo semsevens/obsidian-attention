@@ -2,9 +2,13 @@ import { App, PluginSettingTab, Setting } from 'obsidian';
 import type AttentionPlugin from './main';
 
 export interface AttentionSettings {
-  /** Highlight colours offered in the capture popover. */
-  colors: string[];
-  defaultColor: string;
+  /**
+   * The one colour marks are drawn in. Per-annotation colours were dropped:
+   * choosing between five swatches every time is a decision the act of
+   * marking shouldn't require, and how often a passage caught you carries
+   * more than which shade you happened to pick.
+   */
+  markColor: string;
 
   /**
    * How a mark is drawn. Underline by default: marks are meant to be many, a
@@ -43,8 +47,7 @@ export interface AttentionSettings {
 }
 
 export const DEFAULT_SETTINGS: AttentionSettings = {
-  colors: ['#f5c542', '#7ec96b', '#63b3ed', '#e879a6', '#b794f4'],
-  defaultColor: '#f5c542',
+  markColor: '#f5c542',
   markStyle: 'underline',
   popoverOnSelection: true,
   enableMarkdownHost: true,
@@ -63,6 +66,19 @@ export class AttentionSettingTab extends PluginSettingTab {
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
+
+    new Setting(containerEl).setName('Appearance').setHeading();
+
+    new Setting(containerEl)
+      .setName('Mark colour')
+      .setDesc('Marks share one colour. A passage marked more than once is drawn more strongly.')
+      .addColorPicker(c =>
+        c.setValue(this.plugin.settings.markColor).onChange(async v => {
+          this.plugin.settings.markColor = v;
+          await this.plugin.saveSettings();
+          this.plugin.applyMarkColor();
+        }),
+      );
 
     new Setting(containerEl).setName('Where to annotate').setHeading();
 

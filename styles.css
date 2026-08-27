@@ -177,6 +177,41 @@ body.at-style-background .at-hl:hover {
   gap: 6px;
 }
 
+/* Times a passage has caught you, listed in the bubble. */
+.at-bubble-hits {
+  margin-bottom: 8px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+}
+
+.at-hit-count {
+  color: var(--text-muted);
+  font-weight: var(--font-medium);
+}
+
+.at-hit-time {
+  padding-left: 8px;
+}
+
+.at-pop-mark {
+  font-weight: var(--font-medium);
+}
+
+.at-when {
+  color: var(--text-faint);
+}
+
+/* Repeat count in the review panel. */
+.at-hits {
+  color: var(--text-accent);
+  font-weight: var(--font-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.at-entry {
+  border-left-color: var(--at-color, var(--text-accent));
+}
+
 /* Briefly ring an annotation the review panel jumped to. */
 @keyframes at-flash {
   from { box-shadow: 0 0 0 3px var(--text-accent); }

@@ -1,47 +1,52 @@
+import { Annotation, lastMarked } from '../model';
+
 /**
- * What you get when you click a highlight: its comment, and the three things
- * you might want to do to it.
+ * What you get when you click a mark: its comment, when it caught you, and the
+ * things you might do to it.
  *
- * Separate from SelectionPopover because it reads rather than creates — the
- * comment body is the point, the buttons are secondary.
+ * The history is the point. A passage you marked three times over a year says
+ * something a single date can't, so every hit is listed rather than collapsed
+ * into a count.
  */
 export interface BubbleActions {
   onEdit(): void;
-  onRecolour(): void;
+  onMarkAgain(): void;
   onRemove(): void;
 }
 
 export class CommentBubble {
   private el: HTMLElement | null = null;
   private dismiss = (e: Event) => {
-    // Clicking inside the bubble shouldn't close it.
     if (e.target instanceof Node && this.el?.contains(e.target)) return;
     this.hide();
   };
 
-  showFor(rect: DOMRect, body: string | null, actions: BubbleActions): void {
+  showFor(rect: DOMRect, annotation: Annotation, actions: BubbleActions): void {
     this.hide();
 
     const el = document.createElement('div');
     el.className = 'at-bubble';
 
-    if (body && body.trim().length > 0) {
-      el.createDiv('at-bubble-body').setText(body);
-    } else {
-      el.createDiv('at-bubble-empty').setText('No comment yet.');
+    const body = annotation.body;
+    if (body && body.trim().length > 0) el.createDiv('at-bubble-body').setText(body);
+    else el.createDiv('at-bubble-empty').setText('No comment yet.');
+
+    const hits = annotation.hits;
+    const times = el.createDiv('at-bubble-hits');
+    times.createSpan({ cls: 'at-hit-count', text: hits.length === 1 ? 'Marked once' : `Marked ${hits.length}×` });
+    // Newest first: the most recent time it landed is the one you're asking about.
+    for (const at of [...hits].reverse()) {
+      times.createDiv('at-hit-time').setText(formatWhen(at));
     }
 
     const row = el.createDiv('at-bubble-actions');
     const add = (label: string, fn: () => void, warn = false) => {
       const b = row.createEl('button', { cls: 'at-pop-btn', text: label });
       if (warn) b.addClass('mod-warning');
-      b.addEventListener('click', () => {
-        fn();
-        this.hide();
-      });
+      b.addEventListener('click', () => { fn(); this.hide(); });
     };
     add(body ? 'Edit' : 'Comment', actions.onEdit);
-    add('Colour', actions.onRecolour);
+    add('Mark again', actions.onMarkAgain);
     add('Remove', actions.onRemove, true);
 
     document.body.appendChild(el);
@@ -69,3 +74,15 @@ export class CommentBubble {
     this.el = null;
   }
 }
+
+/** "Today", "3 days ago", or a date once it stops being relative to now. */
+export function formatWhen(iso: string, now = Date.now()): string {
+  const days = Math.floor((now - Date.parse(iso)) / 86_400_000);
+  if (!Number.isFinite(days)) return iso;
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days} days ago`;
+  return new Date(iso).toISOString().slice(0, 10);
+}
+
+export { lastMarked };

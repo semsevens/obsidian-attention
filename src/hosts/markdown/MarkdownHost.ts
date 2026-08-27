@@ -1,5 +1,5 @@
 import { App, Editor, Menu, MarkdownView, MarkdownFileInfo, Notice, Plugin, TFile } from 'obsidian';
-import { Annotation, MarkdownAnchor, newId } from '../../model';
+import { MarkdownAnchor } from '../../model';
 import { describe, nthOccurrence, countOccurrences } from '../../anchor/textQuote';
 import { AnnotationStore } from '../../store/annotationStore';
 import { SelectionPopover } from '../../ui/SelectionPopover';
@@ -33,7 +33,7 @@ export class MarkdownHost {
     private store: AnnotationStore,
     private settings: AttentionSettings,
   ) {
-    this.popover = new SelectionPopover(settings.colors);
+    this.popover = new SelectionPopover();
   }
 
   register(): void {
@@ -95,14 +95,9 @@ export class MarkdownHost {
     const annotation = data.annotations.find(a => a.id === id);
     if (!annotation) return;
 
-    this.bubble.showFor(el.getBoundingClientRect(), annotation.body, {
+    this.bubble.showFor(el.getBoundingClientRect(), annotation, {
       onEdit: () => { void this.editComment(file, id); },
-      onRecolour: () => {
-        this.popover.showAt(el.getBoundingClientRect(), {
-          onHighlight: color => { void this.store.update(file.path, id, { color }); },
-          onComment: () => { void this.editComment(file, id); },
-        });
-      },
+      onMarkAgain: () => { void this.mark(file, annotation.anchor as MarkdownAnchor, null); },
       onRemove: () => { void this.store.remove(file.path, id); },
     });
   }
@@ -144,7 +139,7 @@ export class MarkdownHost {
     if (!anchor) return;
 
     this.popover.showAt(rect, {
-      onHighlight: color => { void this.create(file, anchor, color, null); },
+      onMark: () => { void this.mark(file, anchor, null); },
       onComment: () => this.promptComment(file, anchor, ''),
     });
   }
@@ -214,23 +209,9 @@ export class MarkdownHost {
   private addCreateItems(menu: Menu, file: TFile, anchor: MarkdownAnchor): void {
     menu.addItem(item =>
       item
-        .setTitle('Highlight')
+        .setTitle('Mark')
         .setIcon('highlighter')
-        .onClick(() => { void this.create(file, anchor, this.settings.defaultColor, null); }),
-    );
-
-    menu.addItem(item =>
-      item
-        .setTitle('Highlight in colour…')
-        .setIcon('palette')
-        // MenuItem has no submenu in the public API, so the swatches reuse the
-        // popover — opened deliberately here rather than on every selection.
-        .onClick(e => {
-          this.popover.showAt(rectOf(e), {
-            onHighlight: color => { void this.create(file, anchor, color, null); },
-            onComment: () => this.promptComment(file, anchor, ''),
-          });
-        }),
+        .onClick(() => { void this.mark(file, anchor, null); }),
     );
 
     menu.addItem(item =>
@@ -254,18 +235,6 @@ export class MarkdownHost {
 
     menu.addItem(item =>
       item
-        .setTitle('Change colour…')
-        .setIcon('palette')
-        .onClick(() => {
-          this.popover.showAt(el.getBoundingClientRect(), {
-            onHighlight: color => { void this.store.update(file.path, id, { color }); },
-            onComment: () => { void this.editComment(file, id); },
-          });
-        }),
-    );
-
-    menu.addItem(item =>
-      item
         .setTitle('Remove highlight')
         .setIcon('trash')
         .setWarning(true)
@@ -277,7 +246,7 @@ export class MarkdownHost {
 
   private promptComment(file: TFile, anchor: MarkdownAnchor, initial: string): void {
     new CommentModal(this.app, anchor.quote, initial, body => {
-      void this.create(file, anchor, this.settings.defaultColor, body || null);
+      void this.mark(file, anchor, body || null);
     }).open();
   }
 
@@ -290,21 +259,9 @@ export class MarkdownHost {
     }).open();
   }
 
-  private async create(
-    file: TFile,
-    anchor: MarkdownAnchor,
-    color: string,
-    body: string | null,
-  ): Promise<void> {
-    const annotation: Annotation = {
-      id: newId(),
-      anchor,
-      color,
-      body,
-      created: new Date().toISOString(),
-      reviewed: [],
-    };
-    await this.store.add(file.path, annotation);
+  private async mark(file: TFile, anchor: MarkdownAnchor, body: string | null): Promise<void> {
+    const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
+    if (repeat) new Notice(`Marked ${annotation.hits.length}× now`);
   }
 }
 

@@ -1,5 +1,5 @@
 import { App, TFile } from 'obsidian';
-import { AnnotationFile, emptyFile } from '../model';
+import { AnnotationFile, emptyFile, normalize } from '../model';
 import { sidecarPathFor } from './paths';
 
 // Path rules live in ./paths (no `obsidian` import, so they're unit-testable).
@@ -20,8 +20,10 @@ export async function loadSidecar(
       parsed && typeof parsed === 'object' &&
       Array.isArray((parsed as AnnotationFile).annotations)
     ) {
-      // Trust but re-stamp the target: the file may have been renamed.
-      return { ...(parsed as AnnotationFile), target: targetPath };
+      // Trust but re-stamp the target: the file may have been renamed. Older
+      // annotations are brought up to date here rather than by a migration.
+      const file = parsed as AnnotationFile;
+      return { ...file, target: targetPath, annotations: file.annotations.map(normalize) };
     }
   } catch {
     // Fall through — a broken sidecar shouldn't take the view down with it.

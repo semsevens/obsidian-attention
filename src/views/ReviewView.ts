@@ -1,9 +1,10 @@
 import { ItemView, WorkspaceLeaf, TFile } from 'obsidian';
 import type AttentionPlugin from '../main';
 import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
-import { Annotation, isComment } from '../model';
+import { Annotation, isComment, lastMarked } from '../model';
 import { inDocumentOrder } from '../store/documentOrder';
 import { reveal } from '../hosts/markdown/reveal';
+import { formatWhen } from '../ui/CommentBubble';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
 
@@ -147,20 +148,23 @@ export class ReviewView extends ItemView {
 
   private renderEntry(root: HTMLElement, annotation: Annotation, targetPath: string): void {
     const el = root.createDiv('at-entry');
-    el.setCssProps({ '--at-color': annotation.color });
-
     el.createDiv('at-quote').setText(annotation.anchor.quote);
     if (isComment(annotation)) {
       el.createDiv('at-body').setText(annotation.body ?? '');
     }
 
+    const meta = el.createDiv('at-meta');
     // In the per-note outline the filename is noise — it's the same every time.
     if (this.lens === 'all' || this.resurfaced) {
-      const meta = el.createDiv('at-meta');
       meta.createSpan({ text: targetPath.split('/').pop() ?? targetPath, cls: 'at-source' });
-      if (annotation.anchor.kind === 'transcript') {
-        meta.createSpan({ text: fmtTime(annotation.anchor.start), cls: 'at-time' });
-      }
+    }
+    if (annotation.anchor.kind === 'transcript') {
+      meta.createSpan({ text: fmtTime(annotation.anchor.start), cls: 'at-time' });
+    }
+    meta.createSpan({ text: formatWhen(lastMarked(annotation)), cls: 'at-when' });
+    // A passage that caught you more than once is the point; say so.
+    if (annotation.hits.length > 1) {
+      meta.createSpan({ text: `${annotation.hits.length}×`, cls: 'at-hits' });
     }
 
     el.addEventListener('click', () => { void this.jumpTo(annotation, targetPath); });

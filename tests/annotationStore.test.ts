@@ -8,9 +8,8 @@ function annotation(id: string): Annotation {
   return {
     id,
     anchor: { kind: 'markdown', from: 0, to: 3, quote: 'abc', prefix: '', suffix: '' },
-    color: '#fff',
     body: null,
-    created: '2026-08-27T00:00:00.000Z',
+    hits: ['2026-08-27T00:00:00.000Z'],
     reviewed: [],
   };
 }

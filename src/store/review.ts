@@ -4,7 +4,7 @@
 // you* can be tested directly — this is the part of the plugin that determines
 // whether an old highlight is ever seen again.
 
-import { Annotation } from '../model';
+import { Annotation, lastMarked } from '../model';
 
 export interface IndexEntry {
   targetPath: string;
@@ -27,7 +27,9 @@ const DAY = 86_400_000;
 export function bucketize(entries: readonly IndexEntry[], now: number): Record<Bucket, IndexEntry[]> {
   const out: Record<Bucket, IndexEntry[]> = { today: [], week: [], month: [], older: [] };
   for (const e of entries) {
-    const age = now - Date.parse(e.annotation.created);
+    // Age from the *latest* hit: something you marked again today belongs in
+    // today, however long ago you first noticed it.
+    const age = now - Date.parse(lastMarked(e.annotation));
     if (age < DAY) out.today.push(e);
     else if (age < 7 * DAY) out.week.push(e);
     else if (age < 30 * DAY) out.month.push(e);
@@ -56,7 +58,7 @@ export function pickResurface(
   return decorated.slice(0, Math.max(0, n)).map(d => d.entry);
 }
 
-/** Newest first. Stable for equal timestamps. */
+/** Most recently marked first. Stable for equal timestamps. */
 export function byNewest(a: IndexEntry, b: IndexEntry): number {
-  return b.annotation.created.localeCompare(a.annotation.created);
+  return lastMarked(b.annotation).localeCompare(lastMarked(a.annotation));
 }

@@ -30,7 +30,6 @@ export function paintQuote(root: HTMLElement, annotation: Annotation, quote = an
 
     const span = document.createElement('span');
     span.className = isComment(annotation) ? 'at-hl at-hl-comment' : 'at-hl';
-    span.style.setProperty('--at-color', annotation.color);
     span.dataset.atId = annotation.id;
     tail.replaceWith(span);
     span.appendChild(tail);

@@ -13,8 +13,8 @@ is never modified**.
 
 ## Using it
 
-Select text in a note and the colour swatches appear; pick one to highlight, or
-💬 to write a comment. Turn that off in settings to capture only deliberately.
+Select text in a note and a small bar appears: **Mark** it, or 💬 to write a
+comment. Turn that off in settings to capture only deliberately.
 
 Either way, right-click a selection for the full menu:
 
@@ -22,8 +22,12 @@ Either way, right-click a selection for the full menu:
 - **Highlight in colour…** — pick from the palette
 - **Comment…** — write a note against the passage (⌘/Ctrl+Enter saves)
 
-Click a highlight to read its comment; right-click it to edit, recolour or
-remove. In editing modes these are appended to Obsidian's own context menu;
+Click a mark to read its comment and see every time that passage caught you;
+right-click it to edit or remove.
+
+Marking something already marked doesn't create a second mark — it records
+another hit. A line that moves you three times over a year is the strongest
+thing this plugin can know about you, and the panel shows it as `3×`. In editing modes these are appended to Obsidian's own context menu;
 reading mode gets its own, raised only when there is something to offer.
 
 The ribbon's highlighter icon opens the panel, which has two views of the same
@@ -45,6 +49,10 @@ sturdier than anything here — it cannot lose its anchor, because it *is* the
 text — and it travels to any markdown tool. What it can't do is carry a comment,
 a colour, or a date, or tell you what you marked last week; and it edits the file
 to exist at all.
+
+Marks share one colour, set in settings. Choosing a swatch every time turns
+noticing something into a decision, and how often a passage caught you carries
+more than which shade you picked.
 
 Marks are drawn as an underline by default. They are meant to be many, a page of
 filled blocks is unreadable, and a background fill looks exactly like

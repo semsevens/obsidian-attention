@@ -32,8 +32,7 @@ var import_obsidian9 = require("obsidian");
 // src/settings.ts
 var import_obsidian = require("obsidian");
 var DEFAULT_SETTINGS = {
-  colors: ["#f5c542", "#7ec96b", "#63b3ed", "#e879a6", "#b794f4"],
-  defaultColor: "#f5c542",
+  markColor: "#f5c542",
   markStyle: "underline",
   popoverOnSelection: true,
   enableMarkdownHost: true,
@@ -51,6 +50,14 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    new import_obsidian.Setting(containerEl).setName("Appearance").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Mark colour").setDesc("Marks share one colour. A passage marked more than once is drawn more strongly.").addColorPicker(
+      (c) => c.setValue(this.plugin.settings.markColor).onChange(async (v) => {
+        this.plugin.settings.markColor = v;
+        await this.plugin.saveSettings();
+        this.plugin.applyMarkColor();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Where to annotate").setHeading();
     new import_obsidian.Setting(containerEl).setName("Markdown notes").setDesc("Highlight and comment inside notes. The note itself is never modified.").addToggle(
       (t) => t.setValue(this.plugin.settings.enableMarkdownHost).onChange(async (v) => {
@@ -142,6 +149,17 @@ function targetPathFor(sidecarPath) {
 var import_obsidian2 = require("obsidian");
 
 // src/model.ts
+function lastMarked(a) {
+  var _a;
+  return (_a = a.hits[a.hits.length - 1]) != null ? _a : "";
+}
+function normalize(raw) {
+  var _a;
+  if (Array.isArray(raw.hits) && raw.hits.length > 0)
+    return raw;
+  const created = (_a = raw.created) != null ? _a : new Date().toISOString();
+  return { ...raw, hits: [created] };
+}
 function emptyFile(target) {
   return { version: 1, target, annotations: [] };
 }
@@ -150,6 +168,19 @@ function newId() {
 }
 function isComment(a) {
   return a.body !== null && a.body.trim().length > 0;
+}
+function sameSpot(a, b) {
+  if (a.kind !== b.kind)
+    return false;
+  if (a.quote !== b.quote)
+    return false;
+  if (a.kind === "markdown" && b.kind === "markdown") {
+    return a.from < b.to && b.from < a.to;
+  }
+  if (a.kind === "transcript" && b.kind === "transcript") {
+    return a.seg === b.seg || Math.abs(a.start - b.start) < 0.5;
+  }
+  return false;
 }
 
 // src/store/sidecar.ts
@@ -160,7 +191,8 @@ async function loadSidecar(app, targetPath) {
   try {
     const parsed = JSON.parse(await app.vault.read(file));
     if (parsed && typeof parsed === "object" && Array.isArray(parsed.annotations)) {
-      return { ...parsed, target: targetPath };
+      const file2 = parsed;
+      return { ...file2, target: targetPath, annotations: file2.annotations.map(normalize) };
     }
   } catch (e) {
   }
@@ -187,7 +219,7 @@ var DAY = 864e5;
 function bucketize(entries, now) {
   const out = { today: [], week: [], month: [], older: [] };
   for (const e of entries) {
-    const age = now - Date.parse(e.annotation.created);
+    const age = now - Date.parse(lastMarked(e.annotation));
     if (age < DAY)
       out.today.push(e);
     else if (age < 7 * DAY)
@@ -210,7 +242,7 @@ function pickResurface(entries, n, rand) {
   return decorated.slice(0, Math.max(0, n)).map((d) => d.entry);
 }
 function byNewest(a, b) {
-  return b.annotation.created.localeCompare(a.annotation.created);
+  return lastMarked(b.annotation).localeCompare(lastMarked(a.annotation));
 }
 
 // src/store/attentionIndex.ts
@@ -450,6 +482,81 @@ function flash(el) {
   window.setTimeout(() => el.removeClass("at-flash"), 1300);
 }
 
+// src/ui/CommentBubble.ts
+var CommentBubble = class {
+  constructor() {
+    this.el = null;
+    this.dismiss = (e) => {
+      var _a;
+      if (e.target instanceof Node && ((_a = this.el) == null ? void 0 : _a.contains(e.target)))
+        return;
+      this.hide();
+    };
+  }
+  showFor(rect, annotation, actions) {
+    this.hide();
+    const el = document.createElement("div");
+    el.className = "at-bubble";
+    const body = annotation.body;
+    if (body && body.trim().length > 0)
+      el.createDiv("at-bubble-body").setText(body);
+    else
+      el.createDiv("at-bubble-empty").setText("No comment yet.");
+    const hits = annotation.hits;
+    const times = el.createDiv("at-bubble-hits");
+    times.createSpan({ cls: "at-hit-count", text: hits.length === 1 ? "Marked once" : `Marked ${hits.length}\xD7` });
+    for (const at of [...hits].reverse()) {
+      times.createDiv("at-hit-time").setText(formatWhen(at));
+    }
+    const row = el.createDiv("at-bubble-actions");
+    const add = (label, fn, warn = false) => {
+      const b = row.createEl("button", { cls: "at-pop-btn", text: label });
+      if (warn)
+        b.addClass("mod-warning");
+      b.addEventListener("click", () => {
+        fn();
+        this.hide();
+      });
+    };
+    add(body ? "Edit" : "Comment", actions.onEdit);
+    add("Mark again", actions.onMarkAgain);
+    add("Remove", actions.onRemove, true);
+    document.body.appendChild(el);
+    this.el = el;
+    const { width, height } = el.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(8, rect.left + rect.width / 2 - width / 2),
+      window.innerWidth - width - 8
+    );
+    const above = rect.top - height - 8;
+    el.style.left = `${left}px`;
+    el.style.top = `${above < 8 ? rect.bottom + 8 : above}px`;
+    window.setTimeout(() => {
+      document.addEventListener("mousedown", this.dismiss);
+      document.addEventListener("keydown", this.dismiss);
+    }, 0);
+  }
+  hide() {
+    var _a;
+    document.removeEventListener("mousedown", this.dismiss);
+    document.removeEventListener("keydown", this.dismiss);
+    (_a = this.el) == null ? void 0 : _a.remove();
+    this.el = null;
+  }
+};
+function formatWhen(iso, now = Date.now()) {
+  const days = Math.floor((now - Date.parse(iso)) / 864e5);
+  if (!Number.isFinite(days))
+    return iso;
+  if (days <= 0)
+    return "today";
+  if (days === 1)
+    return "yesterday";
+  if (days < 30)
+    return `${days} days ago`;
+  return new Date(iso).toISOString().slice(0, 10);
+}
+
 // src/views/ReviewView.ts
 var VIEW_TYPE_REVIEW = "attention-review";
 var BUCKET_LABELS = {
@@ -572,17 +679,20 @@ var ReviewView = class extends import_obsidian4.ItemView {
   renderEntry(root, annotation, targetPath) {
     var _a, _b;
     const el = root.createDiv("at-entry");
-    el.setCssProps({ "--at-color": annotation.color });
     el.createDiv("at-quote").setText(annotation.anchor.quote);
     if (isComment(annotation)) {
       el.createDiv("at-body").setText((_a = annotation.body) != null ? _a : "");
     }
+    const meta = el.createDiv("at-meta");
     if (this.lens === "all" || this.resurfaced) {
-      const meta = el.createDiv("at-meta");
       meta.createSpan({ text: (_b = targetPath.split("/").pop()) != null ? _b : targetPath, cls: "at-source" });
-      if (annotation.anchor.kind === "transcript") {
-        meta.createSpan({ text: fmtTime(annotation.anchor.start), cls: "at-time" });
-      }
+    }
+    if (annotation.anchor.kind === "transcript") {
+      meta.createSpan({ text: fmtTime(annotation.anchor.start), cls: "at-time" });
+    }
+    meta.createSpan({ text: formatWhen(lastMarked(annotation)), cls: "at-when" });
+    if (annotation.hits.length > 1) {
+      meta.createSpan({ text: `${annotation.hits.length}\xD7`, cls: "at-hits" });
     }
     el.addEventListener("click", () => {
       void this.jumpTo(annotation, targetPath);
@@ -647,6 +757,42 @@ var AnnotationStore = class {
     await this.get(targetPath);
     this.emit(targetPath);
   }
+  /**
+   * Record that a passage caught you.
+   *
+   * Marking something already marked appends to its history instead of making a
+   * second annotation. A line that moves you three times over a year is the
+   * strongest thing this plugin can know about you, and deduplicating it away
+   * would throw exactly that away.
+   *
+   * Returns the annotation and whether this was a fresh mark or a repeat, so
+   * the caller can say so.
+   */
+  async mark(targetPath, anchor, body) {
+    const data = await this.get(targetPath);
+    const now = new Date().toISOString();
+    const existing = data.annotations.find((a) => sameSpot(a.anchor, anchor));
+    if (existing) {
+      existing.hits.push(now);
+      if (body)
+        existing.body = existing.body ? `${existing.body}
+
+${body}` : body;
+      existing.updated = now;
+      await this.commit(targetPath, data);
+      return { annotation: existing, repeat: true };
+    }
+    const annotation = {
+      id: newId(),
+      anchor,
+      hits: [now],
+      body,
+      reviewed: []
+    };
+    data.annotations.push(annotation);
+    await this.commit(targetPath, data);
+    return { annotation, repeat: false };
+  }
   async add(targetPath, annotation) {
     const data = await this.get(targetPath);
     data.annotations.push(annotation);
@@ -695,8 +841,7 @@ var import_obsidian6 = require("obsidian");
 
 // src/ui/SelectionPopover.ts
 var SelectionPopover = class {
-  constructor(colors) {
-    this.colors = colors;
+  constructor() {
     this.el = null;
     this.dismiss = () => this.hide();
   }
@@ -704,90 +849,20 @@ var SelectionPopover = class {
     this.hide();
     const el = document.createElement("div");
     el.className = "at-popover";
-    for (const color of this.colors) {
-      const swatch = el.createEl("button", { cls: "at-swatch" });
-      swatch.style.background = color;
-      swatch.setAttribute("aria-label", `Highlight ${color}`);
-      swatch.addEventListener("mousedown", (e) => {
+    const add = (label, title, fn, cls = "at-pop-btn") => {
+      const b = el.createEl("button", { cls, text: label });
+      b.setAttribute("aria-label", title);
+      b.setAttribute("title", title);
+      b.addEventListener("mousedown", (e) => {
         e.preventDefault();
-        actions.onHighlight(color);
-        this.hide();
-      });
-    }
-    const comment = el.createEl("button", { cls: "at-pop-btn", text: "\u{1F4AC}" });
-    comment.setAttribute("aria-label", "Add a comment");
-    comment.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      actions.onComment();
-      this.hide();
-    });
-    if (actions.onRemove) {
-      const remove = el.createEl("button", { cls: "at-pop-btn", text: "\u2715" });
-      remove.setAttribute("aria-label", "Remove highlight");
-      remove.addEventListener("mousedown", (e) => {
-        var _a;
-        e.preventDefault();
-        (_a = actions.onRemove) == null ? void 0 : _a.call(actions);
-        this.hide();
-      });
-    }
-    document.body.appendChild(el);
-    this.el = el;
-    const { width, height } = el.getBoundingClientRect();
-    const left = Math.min(
-      Math.max(8, rect.left + rect.width / 2 - width / 2),
-      window.innerWidth - width - 8
-    );
-    const above = rect.top - height - 8;
-    el.style.left = `${left}px`;
-    el.style.top = `${above < 8 ? rect.bottom + 8 : above}px`;
-    window.setTimeout(() => {
-      document.addEventListener("mousedown", this.dismiss);
-      document.addEventListener("keydown", this.dismiss);
-    }, 0);
-  }
-  hide() {
-    var _a;
-    document.removeEventListener("mousedown", this.dismiss);
-    document.removeEventListener("keydown", this.dismiss);
-    (_a = this.el) == null ? void 0 : _a.remove();
-    this.el = null;
-  }
-};
-
-// src/ui/CommentBubble.ts
-var CommentBubble = class {
-  constructor() {
-    this.el = null;
-    this.dismiss = (e) => {
-      var _a;
-      if (e.target instanceof Node && ((_a = this.el) == null ? void 0 : _a.contains(e.target)))
-        return;
-      this.hide();
-    };
-  }
-  showFor(rect, body, actions) {
-    this.hide();
-    const el = document.createElement("div");
-    el.className = "at-bubble";
-    if (body && body.trim().length > 0) {
-      el.createDiv("at-bubble-body").setText(body);
-    } else {
-      el.createDiv("at-bubble-empty").setText("No comment yet.");
-    }
-    const row = el.createDiv("at-bubble-actions");
-    const add = (label, fn, warn = false) => {
-      const b = row.createEl("button", { cls: "at-pop-btn", text: label });
-      if (warn)
-        b.addClass("mod-warning");
-      b.addEventListener("click", () => {
         fn();
         this.hide();
       });
     };
-    add(body ? "Edit" : "Comment", actions.onEdit);
-    add("Colour", actions.onRecolour);
-    add("Remove", actions.onRemove, true);
+    add("Mark", "Mark this passage", actions.onMark, "at-pop-btn at-pop-mark");
+    add("\u{1F4AC}", "Add a comment", actions.onComment);
+    if (actions.onRemove)
+      add("\u2715", "Remove mark", actions.onRemove);
     document.body.appendChild(el);
     this.el = el;
     const { width, height } = el.getBoundingClientRect();
@@ -861,7 +936,7 @@ var MarkdownHost = class {
     this.bubble = new CommentBubble();
     /** The element right-clicked, captured before any menu is built. */
     this.lastTarget = null;
-    this.popover = new SelectionPopover(settings.colors);
+    this.popover = new SelectionPopover();
   }
   register() {
     this.plugin.registerDomEvent(
@@ -919,19 +994,12 @@ var MarkdownHost = class {
     const annotation = data.annotations.find((a) => a.id === id);
     if (!annotation)
       return;
-    this.bubble.showFor(el.getBoundingClientRect(), annotation.body, {
+    this.bubble.showFor(el.getBoundingClientRect(), annotation, {
       onEdit: () => {
         void this.editComment(file, id);
       },
-      onRecolour: () => {
-        this.popover.showAt(el.getBoundingClientRect(), {
-          onHighlight: (color) => {
-            void this.store.update(file.path, id, { color });
-          },
-          onComment: () => {
-            void this.editComment(file, id);
-          }
-        });
+      onMarkAgain: () => {
+        void this.mark(file, annotation.anchor, null);
       },
       onRemove: () => {
         void this.store.remove(file.path, id);
@@ -974,8 +1042,8 @@ var MarkdownHost = class {
     if (!anchor)
       return;
     this.popover.showAt(rect, {
-      onHighlight: (color) => {
-        void this.create(file, anchor, color, null);
+      onMark: () => {
+        void this.mark(file, anchor, null);
       },
       onComment: () => this.promptComment(file, anchor, "")
     });
@@ -1039,18 +1107,8 @@ var MarkdownHost = class {
   // ── Menu items ─────────────────────────────────────────────────────────────
   addCreateItems(menu, file, anchor) {
     menu.addItem(
-      (item) => item.setTitle("Highlight").setIcon("highlighter").onClick(() => {
-        void this.create(file, anchor, this.settings.defaultColor, null);
-      })
-    );
-    menu.addItem(
-      (item) => item.setTitle("Highlight in colour\u2026").setIcon("palette").onClick((e) => {
-        this.popover.showAt(rectOf(e), {
-          onHighlight: (color) => {
-            void this.create(file, anchor, color, null);
-          },
-          onComment: () => this.promptComment(file, anchor, "")
-        });
+      (item) => item.setTitle("Mark").setIcon("highlighter").onClick(() => {
+        void this.mark(file, anchor, null);
       })
     );
     menu.addItem(
@@ -1067,18 +1125,6 @@ var MarkdownHost = class {
       })
     );
     menu.addItem(
-      (item) => item.setTitle("Change colour\u2026").setIcon("palette").onClick(() => {
-        this.popover.showAt(el.getBoundingClientRect(), {
-          onHighlight: (color) => {
-            void this.store.update(file.path, id, { color });
-          },
-          onComment: () => {
-            void this.editComment(file, id);
-          }
-        });
-      })
-    );
-    menu.addItem(
       (item) => item.setTitle("Remove highlight").setIcon("trash").setWarning(true).onClick(() => {
         void this.store.remove(file.path, id);
       })
@@ -1087,7 +1133,7 @@ var MarkdownHost = class {
   // ── Actions ────────────────────────────────────────────────────────────────
   promptComment(file, anchor, initial) {
     new CommentModal(this.app, anchor.quote, initial, (body) => {
-      void this.create(file, anchor, this.settings.defaultColor, body || null);
+      void this.mark(file, anchor, body || null);
     }).open();
   }
   async editComment(file, id) {
@@ -1100,23 +1146,12 @@ var MarkdownHost = class {
       void this.store.update(file.path, id, { body: body || null });
     }).open();
   }
-  async create(file, anchor, color, body) {
-    const annotation = {
-      id: newId(),
-      anchor,
-      color,
-      body,
-      created: new Date().toISOString(),
-      reviewed: []
-    };
-    await this.store.add(file.path, annotation);
+  async mark(file, anchor, body) {
+    const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
+    if (repeat)
+      new import_obsidian6.Notice(`Marked ${annotation.hits.length}\xD7 now`);
   }
 };
-function rectOf(e) {
-  const x = e instanceof MouseEvent ? e.clientX : window.innerWidth / 2;
-  const y = e instanceof MouseEvent ? e.clientY : window.innerHeight / 2;
-  return new DOMRect(x, y, 0, 0);
-}
 
 // src/hosts/markdown/decorations.ts
 var import_view = require("@codemirror/view");
@@ -1142,7 +1177,7 @@ function build(view, provider) {
     ranges.push(
       import_view.Decoration.mark({
         class: isComment(a) ? "at-hl at-hl-comment" : "at-hl",
-        attributes: { style: `--at-color: ${a.color}`, "data-at-id": a.id }
+        attributes: { "data-at-id": a.id }
       }).range(at.from, at.to)
     );
   }
@@ -1195,7 +1230,6 @@ function paintQuote(root, annotation, quote = annotation.anchor.quote) {
     tail.splitText(quote.length);
     const span = document.createElement("span");
     span.className = isComment(annotation) ? "at-hl at-hl-comment" : "at-hl";
-    span.style.setProperty("--at-color", annotation.color);
     span.dataset.atId = annotation.id;
     tail.replaceWith(span);
     span.appendChild(tail);
@@ -1306,7 +1340,7 @@ var TranscriptHost = class {
     this.store = store;
     this.settings = settings;
     this.bubble = new CommentBubble();
-    this.popover = new SelectionPopover(settings.colors);
+    this.popover = new SelectionPopover();
   }
   register() {
     const onRendered = (e) => {
@@ -1468,12 +1502,12 @@ var TranscriptHost = class {
     if (!selection || selection.rangeCount === 0)
       return;
     this.popover.showAt(selection.getRangeAt(0).getBoundingClientRect(), {
-      onHighlight: (color) => {
-        void this.create(captured.mediaPath, captured.anchor, color, null);
+      onMark: () => {
+        void this.mark(captured.mediaPath, captured.anchor, null);
       },
       onComment: () => {
         new CommentModal(this.app, captured.anchor.quote, "", (body) => {
-          void this.create(captured.mediaPath, captured.anchor, this.settings.defaultColor, body || null);
+          void this.mark(captured.mediaPath, captured.anchor, body || null);
         }).open();
       }
     });
@@ -1489,29 +1523,19 @@ var TranscriptHost = class {
       menu.addItem((i) => i.setTitle("Edit comment\u2026").setIcon("message-square").onClick(() => {
         void this.editComment(mediaPath, id);
       }));
-      menu.addItem((i) => i.setTitle("Change colour\u2026").setIcon("palette").onClick(() => {
-        this.popover.showAt(hit.getBoundingClientRect(), {
-          onHighlight: (color) => {
-            void this.store.update(mediaPath, id, { color });
-          },
-          onComment: () => {
-            void this.editComment(mediaPath, id);
-          }
-        });
-      }));
-      menu.addItem((i) => i.setTitle("Remove highlight").setIcon("trash").setWarning(true).onClick(() => {
+      menu.addItem((i) => i.setTitle("Remove mark").setIcon("trash").setWarning(true).onClick(() => {
         void this.store.remove(mediaPath, id);
       }));
     } else {
       const captured = this.capture();
       if (!captured)
         return;
-      menu.addItem((i) => i.setTitle("Highlight").setIcon("highlighter").onClick(() => {
-        void this.create(captured.mediaPath, captured.anchor, this.settings.defaultColor, null);
+      menu.addItem((i) => i.setTitle("Mark").setIcon("highlighter").onClick(() => {
+        void this.mark(captured.mediaPath, captured.anchor, null);
       }));
       menu.addItem((i) => i.setTitle("Comment\u2026").setIcon("message-square").onClick(() => {
         new CommentModal(this.app, captured.anchor.quote, "", (body) => {
-          void this.create(captured.mediaPath, captured.anchor, this.settings.defaultColor, body || null);
+          void this.mark(captured.mediaPath, captured.anchor, body || null);
         }).open();
       }));
     }
@@ -1528,19 +1552,12 @@ var TranscriptHost = class {
     const annotation = data.annotations.find((a) => a.id === id);
     if (!annotation)
       return;
-    this.bubble.showFor(el.getBoundingClientRect(), annotation.body, {
+    this.bubble.showFor(el.getBoundingClientRect(), annotation, {
       onEdit: () => {
         void this.editComment(mediaPath, id);
       },
-      onRecolour: () => {
-        this.popover.showAt(el.getBoundingClientRect(), {
-          onHighlight: (color) => {
-            void this.store.update(mediaPath, id, { color });
-          },
-          onComment: () => {
-            void this.editComment(mediaPath, id);
-          }
-        });
+      onMarkAgain: () => {
+        void this.mark(mediaPath, annotation.anchor, null);
       },
       onRemove: () => {
         void this.store.remove(mediaPath, id);
@@ -1557,16 +1574,10 @@ var TranscriptHost = class {
       void this.store.update(mediaPath, id, { body: body || null });
     }).open();
   }
-  async create(mediaPath, anchor, color, body) {
-    const annotation = {
-      id: newId(),
-      anchor,
-      color,
-      body,
-      created: new Date().toISOString(),
-      reviewed: []
-    };
-    await this.store.add(mediaPath, annotation);
+  async mark(mediaPath, anchor, body) {
+    const { repeat, annotation } = await this.store.mark(mediaPath, anchor, body);
+    if (repeat)
+      new import_obsidian8.Notice(`Marked ${annotation.hits.length}\xD7 now`);
   }
 };
 
@@ -1588,6 +1599,7 @@ var AttentionPlugin = class extends import_obsidian9.Plugin {
     this.store = new AnnotationStore(this.app, this.index);
     this.registerView(VIEW_TYPE_REVIEW, (leaf) => new ReviewView(leaf, this));
     this.applyMarkStyle();
+    this.applyMarkColor();
     if (this.settings.enableMarkdownHost)
       this.setupMarkdownHost();
     if (this.settings.enableTranscriptHost) {
@@ -1627,6 +1639,10 @@ var AttentionPlugin = class extends import_obsidian9.Plugin {
   /** Mark style is a body class, so switching it needs no repaint. */
   applyMarkStyle() {
     document.body.toggleClass("at-style-background", this.settings.markStyle === "background");
+  }
+  /** One colour for every mark, published as a variable so nothing repaints. */
+  applyMarkColor() {
+    document.body.style.setProperty("--at-color", this.settings.markColor);
   }
   async onLayoutReady() {
     await this.rebuildIndex();
@@ -1753,6 +1769,7 @@ var AttentionPlugin = class extends import_obsidian9.Plugin {
     (_a = this.markdownHost) == null ? void 0 : _a.detach();
     (_b = this.transcriptHost) == null ? void 0 : _b.detach();
     document.body.removeClass("at-style-background");
+    document.body.style.removeProperty("--at-color");
   }
   async loadSettings() {
     const saved = await this.loadData();

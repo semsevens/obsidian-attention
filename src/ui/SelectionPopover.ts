@@ -1,11 +1,12 @@
 /**
- * The little toolbar that appears over a selection.
+ * The little bar that appears over a selection.
  *
- * Deliberately dumb: it knows how to show itself near a rectangle and which
- * callbacks to fire. Deciding what a selection *means* is the host's job.
+ * Two actions, no palette. Picking a colour every time turns marking into a
+ * decision, and what this plugin actually cares about — how often a passage
+ * caught you — isn't something a swatch can say.
  */
 export interface PopoverActions {
-  onHighlight(color: string): void;
+  onMark(): void;
   onComment(): void;
   onRemove?(): void;
 }
@@ -14,43 +15,27 @@ export class SelectionPopover {
   private el: HTMLElement | null = null;
   private dismiss = () => this.hide();
 
-  constructor(private colors: string[]) {}
-
   showAt(rect: DOMRect, actions: PopoverActions): void {
     this.hide();
 
     const el = document.createElement('div');
     el.className = 'at-popover';
 
-    for (const color of this.colors) {
-      const swatch = el.createEl('button', { cls: 'at-swatch' });
-      swatch.style.background = color;
-      swatch.setAttribute('aria-label', `Highlight ${color}`);
-      swatch.addEventListener('mousedown', e => {
-        // mousedown, not click: clicking would clear the selection first.
+    const add = (label: string, title: string, fn: () => void, cls = 'at-pop-btn') => {
+      const b = el.createEl('button', { cls, text: label });
+      b.setAttribute('aria-label', title);
+      b.setAttribute('title', title);
+      // mousedown, not click: clicking would clear the selection first.
+      b.addEventListener('mousedown', e => {
         e.preventDefault();
-        actions.onHighlight(color);
+        fn();
         this.hide();
       });
-    }
+    };
 
-    const comment = el.createEl('button', { cls: 'at-pop-btn', text: '💬' });
-    comment.setAttribute('aria-label', 'Add a comment');
-    comment.addEventListener('mousedown', e => {
-      e.preventDefault();
-      actions.onComment();
-      this.hide();
-    });
-
-    if (actions.onRemove) {
-      const remove = el.createEl('button', { cls: 'at-pop-btn', text: '✕' });
-      remove.setAttribute('aria-label', 'Remove highlight');
-      remove.addEventListener('mousedown', e => {
-        e.preventDefault();
-        actions.onRemove?.();
-        this.hide();
-      });
-    }
+    add('Mark', 'Mark this passage', actions.onMark, 'at-pop-btn at-pop-mark');
+    add('💬', 'Add a comment', actions.onComment);
+    if (actions.onRemove) add('✕', 'Remove mark', actions.onRemove);
 
     document.body.appendChild(el);
     this.el = el;

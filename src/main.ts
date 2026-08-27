@@ -32,6 +32,7 @@ export default class AttentionPlugin extends Plugin {
 
 
     this.applyMarkStyle();
+    this.applyMarkColor();
 
     if (this.settings.enableMarkdownHost) this.setupMarkdownHost();
 
@@ -81,6 +82,11 @@ export default class AttentionPlugin extends Plugin {
   /** Mark style is a body class, so switching it needs no repaint. */
   applyMarkStyle(): void {
     document.body.toggleClass('at-style-background', this.settings.markStyle === 'background');
+  }
+
+  /** One colour for every mark, published as a variable so nothing repaints. */
+  applyMarkColor(): void {
+    document.body.style.setProperty('--at-color', this.settings.markColor);
   }
 
   private async onLayoutReady(): Promise<void> {
@@ -235,6 +241,7 @@ export default class AttentionPlugin extends Plugin {
     this.markdownHost?.detach();
     this.transcriptHost?.detach();
     document.body.removeClass('at-style-background');
+    document.body.style.removeProperty('--at-color');
   }
 
   async loadSettings() {

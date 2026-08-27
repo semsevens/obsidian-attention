@@ -9,9 +9,8 @@ function entry(opts: { agoMs?: number; reviewed?: number; id?: string }): IndexE
   const annotation: Annotation = {
     id: opts.id ?? 'x',
     anchor: { kind: 'markdown', from: 0, to: 1, quote: 'q', prefix: '', suffix: '' },
-    color: '#fff',
     body: null,
-    created: new Date(NOW - (opts.agoMs ?? 0)).toISOString(),
+    hits: [new Date(NOW - (opts.agoMs ?? 0)).toISOString()],
     reviewed: Array.from({ length: opts.reviewed ?? 0 }, () => '2026-01-01T00:00:00.000Z'),
   };
   return { targetPath: 'a.md', annotation };
