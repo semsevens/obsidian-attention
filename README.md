@@ -13,7 +13,10 @@ is never modified**.
 
 ## Using it
 
-Right-click a selection in a note:
+Select text in a note and the colour swatches appear; pick one to highlight, or
+💬 to write a comment. Turn that off in settings to capture only deliberately.
+
+Either way, right-click a selection for the full menu:
 
 - **Highlight** — in the default colour
 - **Highlight in colour…** — pick from the palette

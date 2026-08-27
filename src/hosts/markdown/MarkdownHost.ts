@@ -53,6 +53,15 @@ export class MarkdownHost {
       }),
     );
 
+    // Selection finished — left button only, so right-clicking (which is about
+    // to raise a menu) doesn't also throw the swatches up.
+    this.plugin.registerDomEvent(document, 'mouseup', e => {
+      if (e.button !== 0 || !this.settings.popoverOnSelection) return;
+      if (e.target instanceof HTMLElement && e.target.closest('.at-hl, .at-popover, .at-bubble')) return;
+      // Defer so the selection is final by the time we read it.
+      window.setTimeout(() => { void this.onSelectionMade(); }, 0);
+    });
+
     // Left-click a highlight to read its comment. Guarded on an empty
     // selection so click-dragging across a highlight still just selects text.
     this.plugin.registerDomEvent(document, 'click', e => {
@@ -107,6 +116,39 @@ export class MarkdownHost {
     );
   }
 
+  /** Anchor whatever is selected, whichever mode the view is in. */
+  private async capture(view: MarkdownView): Promise<MarkdownAnchor | null> {
+    if (view.getMode() === 'source') return this.captureEditor(view.editor);
+    return view.file ? this.captureRendered(view, view.file) : null;
+  }
+
+  private captureEditor(editor: Editor): MarkdownAnchor | null {
+    const from = editor.posToOffset(editor.getCursor('from'));
+    const to = editor.posToOffset(editor.getCursor('to'));
+    if (from === to) return null;
+    return { kind: 'markdown', ...describe(editor.getValue(), from, to) };
+  }
+
+  /** Selection finished: offer the swatches straight away, if asked to. */
+  private async onSelectionMade(): Promise<void> {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const file = view?.file;
+    if (!view || !file) return;
+
+    const selection = window.getSelection();
+    if (!selection || selection.toString().trim().length === 0) return;
+    if (!view.contentEl.contains(selection.anchorNode)) return;
+
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    const anchor = await this.capture(view);
+    if (!anchor) return;
+
+    this.popover.showAt(rect, {
+      onHighlight: color => { void this.create(file, anchor, color, null); },
+      onComment: () => this.promptComment(file, anchor, ''),
+    });
+  }
+
   // ── Editing modes ──────────────────────────────────────────────────────────
 
   private onEditorMenu(menu: Menu, editor: Editor, info: MarkdownView | MarkdownFileInfo): void {
@@ -119,15 +161,8 @@ export class MarkdownHost {
       return;
     }
 
-    const from = editor.posToOffset(editor.getCursor('from'));
-    const to = editor.posToOffset(editor.getCursor('to'));
-    if (from === to) return;
-
-    const anchor: MarkdownAnchor = {
-      kind: 'markdown',
-      ...describe(editor.getValue(), from, to),
-    };
-    this.addCreateItems(menu, file, anchor);
+    const anchor = this.captureEditor(editor);
+    if (anchor) this.addCreateItems(menu, file, anchor);
   }
 
   // ── Reading mode ───────────────────────────────────────────────────────────

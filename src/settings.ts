@@ -14,6 +14,13 @@ export interface AttentionSettings {
    */
   markStyle: 'underline' | 'background';
 
+  /**
+   * Pop the colour swatches up as soon as a selection is made. The right-click
+   * menu works regardless — it only ever appends to Obsidian's own menu — so
+   * this is purely about whether capture also happens without asking.
+   */
+  popoverOnSelection: boolean;
+
   /** Annotate markdown files (needs the CodeMirror layer). */
   enableMarkdownHost: boolean;
   /** Annotate the Media Transcript plugin's transcript panel. */
@@ -36,6 +43,7 @@ export const DEFAULT_SETTINGS: AttentionSettings = {
   colors: ['#f5c542', '#7ec96b', '#63b3ed', '#e879a6', '#b794f4'],
   defaultColor: '#f5c542',
   markStyle: 'underline',
+  popoverOnSelection: true,
   enableMarkdownHost: true,
   enableTranscriptHost: true,
   trackReplays: false,
@@ -94,6 +102,19 @@ export class AttentionSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
             this.plugin.applyMarkStyle();
           }),
+      );
+
+    new Setting(containerEl)
+      .setName('Show swatches on selection')
+      .setDesc(
+        'Pop up the colour swatches as soon as you select text. Turn this off to capture ' +
+          'only from the right-click menu, which stays available either way.',
+      )
+      .addToggle(t =>
+        t.setValue(this.plugin.settings.popoverOnSelection).onChange(async v => {
+          this.plugin.settings.popoverOnSelection = v;
+          await this.plugin.saveSettings();
+        }),
       );
 
     new Setting(containerEl).setName('Review').setHeading();

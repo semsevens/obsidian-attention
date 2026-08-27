@@ -35,6 +35,7 @@ var DEFAULT_SETTINGS = {
   colors: ["#f5c542", "#7ec96b", "#63b3ed", "#e879a6", "#b794f4"],
   defaultColor: "#f5c542",
   markStyle: "underline",
+  popoverOnSelection: true,
   enableMarkdownHost: true,
   enableTranscriptHost: true,
   trackReplays: false,
@@ -71,6 +72,14 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.settings.markStyle = v;
         await this.plugin.saveSettings();
         this.plugin.applyMarkStyle();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Show swatches on selection").setDesc(
+      "Pop up the colour swatches as soon as you select text. Turn this off to capture only from the right-click menu, which stays available either way."
+    ).addToggle(
+      (t) => t.setValue(this.plugin.settings.popoverOnSelection).onChange(async (v) => {
+        this.plugin.settings.popoverOnSelection = v;
+        await this.plugin.saveSettings();
       })
     );
     new import_obsidian.Setting(containerEl).setName("Review").setHeading();
@@ -682,6 +691,15 @@ var MarkdownHost = class {
         this.onEditorMenu(menu, editor, info);
       })
     );
+    this.plugin.registerDomEvent(document, "mouseup", (e) => {
+      if (e.button !== 0 || !this.settings.popoverOnSelection)
+        return;
+      if (e.target instanceof HTMLElement && e.target.closest(".at-hl, .at-popover, .at-bubble"))
+        return;
+      window.setTimeout(() => {
+        void this.onSelectionMade();
+      }, 0);
+    });
     this.plugin.registerDomEvent(document, "click", (e) => {
       var _a, _b, _c;
       const hit = e.target instanceof HTMLElement ? e.target.closest(".at-hl") : null;
@@ -741,6 +759,41 @@ var MarkdownHost = class {
     const selection = window.getSelection();
     return ((_b = selection == null ? void 0 : selection.toString().trim().length) != null ? _b : 0) > 0 && view.contentEl.contains((_c = selection == null ? void 0 : selection.anchorNode) != null ? _c : null);
   }
+  /** Anchor whatever is selected, whichever mode the view is in. */
+  async capture(view) {
+    if (view.getMode() === "source")
+      return this.captureEditor(view.editor);
+    return view.file ? this.captureRendered(view, view.file) : null;
+  }
+  captureEditor(editor) {
+    const from = editor.posToOffset(editor.getCursor("from"));
+    const to = editor.posToOffset(editor.getCursor("to"));
+    if (from === to)
+      return null;
+    return { kind: "markdown", ...describe(editor.getValue(), from, to) };
+  }
+  /** Selection finished: offer the swatches straight away, if asked to. */
+  async onSelectionMade() {
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    const file = view == null ? void 0 : view.file;
+    if (!view || !file)
+      return;
+    const selection = window.getSelection();
+    if (!selection || selection.toString().trim().length === 0)
+      return;
+    if (!view.contentEl.contains(selection.anchorNode))
+      return;
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    const anchor = await this.capture(view);
+    if (!anchor)
+      return;
+    this.popover.showAt(rect, {
+      onHighlight: (color) => {
+        void this.create(file, anchor, color, null);
+      },
+      onComment: () => this.promptComment(file, anchor, "")
+    });
+  }
   // ── Editing modes ──────────────────────────────────────────────────────────
   onEditorMenu(menu, editor, info) {
     var _a;
@@ -752,15 +805,9 @@ var MarkdownHost = class {
       this.addExistingItems(menu, file, existing);
       return;
     }
-    const from = editor.posToOffset(editor.getCursor("from"));
-    const to = editor.posToOffset(editor.getCursor("to"));
-    if (from === to)
-      return;
-    const anchor = {
-      kind: "markdown",
-      ...describe(editor.getValue(), from, to)
-    };
-    this.addCreateItems(menu, file, anchor);
+    const anchor = this.captureEditor(editor);
+    if (anchor)
+      this.addCreateItems(menu, file, anchor);
   }
   // ── Reading mode ───────────────────────────────────────────────────────────
   async showReadingMenu(e, view) {
