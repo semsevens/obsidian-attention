@@ -14,12 +14,14 @@ import { AnnotationStore } from './store/annotationStore';
 import { MarkdownHost } from './hosts/markdown/MarkdownHost';
 import { annotationDecorations, repaintEditors } from './hosts/markdown/decorations';
 import { readingModeHighlighter } from './hosts/markdown/readingMode';
+import { TranscriptHost } from './hosts/transcript/TranscriptHost';
 
 export default class AttentionPlugin extends Plugin {
   settings!: AttentionSettings;
   index!: AttentionIndex;
   store!: AnnotationStore;
   private markdownHost: MarkdownHost | null = null;
+  private transcriptHost: TranscriptHost | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -32,6 +34,12 @@ export default class AttentionPlugin extends Plugin {
     this.applyMarkStyle();
 
     if (this.settings.enableMarkdownHost) this.setupMarkdownHost();
+
+    if (this.settings.enableTranscriptHost) {
+      // Dormant unless obsidian-media-transcript is installed and announcing.
+      this.transcriptHost = new TranscriptHost(this.app, this, this.store, this.settings);
+      this.transcriptHost.register();
+    }
 
     // A change to any annotation has to reach both rendering paths and the
     // review panel; nothing repaints itself.
@@ -225,6 +233,7 @@ export default class AttentionPlugin extends Plugin {
 
   onunload() {
     this.markdownHost?.detach();
+    this.transcriptHost?.detach();
     document.body.removeClass('at-style-background');
   }
 

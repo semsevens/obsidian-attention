@@ -3,13 +3,53 @@ import { Annotation } from '../../model';
 import { resolve } from '../../anchor/textQuote';
 
 /**
- * Jump to an annotation inside an open note and flash it.
+ * Go to an annotation: open its file and put the passage in front of you.
  *
- * The two modes need different treatment: the editor can be told to select a
- * character range, while reading mode has no offsets and must be found by the
- * `data-at-id` the highlighter stamped on the span.
+ * Each host needs different treatment. A markdown editor can be told to select
+ * a character range; reading mode has no offsets and must be found by the
+ * `data-at-id` stamped on the painted span; a transcript needs the *player*
+ * moved, which is the whole point of marking one.
  */
-export async function revealInMarkdown(
+export async function reveal(app: App, file: TFile, annotation: Annotation): Promise<void> {
+  if (annotation.anchor.kind === 'transcript') {
+    await revealInTranscript(app, file, annotation);
+    return;
+  }
+  await revealInMarkdown(app, file, annotation);
+}
+
+/**
+ * Open the media and seek to the marked moment.
+ *
+ * The transcript is rendered by another plugin and arrives when it arrives, so
+ * the player is polled for rather than assumed; if that plugin isn't handling
+ * this file, nothing is found and we simply leave the file open.
+ */
+async function revealInTranscript(app: App, file: TFile, annotation: Annotation): Promise<void> {
+  if (annotation.anchor.kind !== 'transcript') return;
+  const at = annotation.anchor.start;
+  await app.workspace.getLeaf(false).openFile(file);
+
+  for (let i = 0; i < 40; i++) {
+    const media = document.querySelector('.mt-view video, .mt-view audio');
+    if (media instanceof HTMLMediaElement) {
+      const seek = () => { media.currentTime = at; };
+      if (media.readyState > 0) seek();
+      else media.addEventListener('loadedmetadata', seek, { once: true });
+      void media.play();
+
+      const painted = document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`);
+      if (painted instanceof HTMLElement) {
+        painted.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        flash(painted);
+      }
+      return;
+    }
+    await new Promise(r => window.setTimeout(r, 50));
+  }
+}
+
+async function revealInMarkdown(
   app: App,
   file: TFile,
   annotation: Annotation,

@@ -173,6 +173,40 @@ data 目录、不同步、不进 git，坏了/丢了全库重扫一次即可（`
 - **时间桶**：今天 / 本周 / 本月 / 更早（`AttentionIndex.buckets()`）
 - **Resurface**：随机 N 条，优先没被回顾过的（`resurface()` 按 `reviewed.length` 排序）
 
+## transcript 宿主
+
+### 与 media-transcript 的接口：单向广播
+
+media-transcript 侧只加了两样东西（约 30 行）：每段字幕带上
+`data-mt-seg` / `data-mt-start`，以及每次重建字幕 DOM 后派发一个冒泡的
+`mt:transcript-rendered`（detail 里带 `mediaPath` / `trackPath`）。
+
+**它不知道 Attention 存在**。Attention 监听这个事件后幂等重贴自己的高亮 ——
+所以不用去理解「对方哪个操作会让我的装饰失效」（搜索高亮重写 `.mt-txt` 就是一例，
+那里也补了一次广播）。没装 media-transcript 时事件永远不来，这个宿主自然休眠。
+
+### 跨轨重锚
+
+标注挂在**媒体文件**上，一个媒体可能有多条字幕轨。`resolveTranscript()` 分四级：
+
+| 结果 | 条件 |
+|------|------|
+| `exact` | 同一条轨、段号还在、偏移处就是原文 |
+| `drifted` | 同一条轨、段号还在、原文在段内挪了位置 |
+| `retimed` | **换了轨** —— 在 `start` ±3s 的窗口里找候选，按残存上下文打分 |
+| `unique` | 时间窗里没有，但全轨只出现一次 |
+
+四级都不中返回 null，**刻意不画**。有多个远距离候选时也返回 null —— 宁可显示为
+孤儿，也不要在错误的位置画一条看起来很合理的线。
+
+实测（`_test/attention/`）：在 12 段的 `whisper.json` 上标注，切到 24 段、
+措辞不同的 `讲座.srt`（`先验权重` vs `鲜艳权重`），高亮正确落在对应那一行。
+
+### 采集限制
+
+选区**必须落在同一行字幕内**。跨行选择没有单个 segment 可锚，会弹 Notice 拒绝，
+而不是硬拆成两条或静默存一条错的。
+
 ## 面板：一个面板，两个视角
 
 同一批数据，两个不同的问题，所以共用一个面板而不是占两个侧栏位：
@@ -314,5 +348,6 @@ resurface 排序）。这两块决定「你标过的东西还能不能被找到�
 | 锚定 / 重锚（`anchor/textQuote.ts`）| ✅ 可用，14 个测试 |
 | markdown 宿主（阅读模式 + CM6 实时预览）| ✅ 可用 |
 | 右键菜单 + 选色浮层 + 评论弹窗 | ✅ 可用 |
-| transcript 宿主 | ⬜ 待实现（含 media-transcript 侧的广播改动）|
+| transcript 宿主 | ✅ 可用（含跨轨重锚，9 个测试）|
+| 点回顾条目 seek 回音频 | ✅ 可用 |
 | 失效标注分组 | ⬜ 待实现 |

@@ -3,7 +3,7 @@ import type AttentionPlugin from '../main';
 import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
 import { Annotation, isComment } from '../model';
 import { inDocumentOrder } from '../store/documentOrder';
-import { revealInMarkdown } from '../hosts/markdown/reveal';
+import { reveal } from '../hosts/markdown/reveal';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
 
@@ -173,7 +173,7 @@ export class ReviewView extends ItemView {
     const file = this.app.vault.getAbstractFileByPath(targetPath);
     if (!(file instanceof TFile)) return;
 
-    await revealInMarkdown(this.app, file, annotation);
+    await reveal(this.app, file, annotation);
     // Marking it seen is what makes "prefer things you haven't revisited" work.
     await this.plugin.markReviewed({ targetPath, annotation });
   }

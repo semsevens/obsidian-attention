@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => AttentionPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian = require("obsidian");
@@ -380,6 +380,39 @@ async function inDocumentOrder(app, file, annotations) {
 
 // src/hosts/markdown/reveal.ts
 var import_obsidian3 = require("obsidian");
+async function reveal(app, file, annotation) {
+  if (annotation.anchor.kind === "transcript") {
+    await revealInTranscript(app, file, annotation);
+    return;
+  }
+  await revealInMarkdown(app, file, annotation);
+}
+async function revealInTranscript(app, file, annotation) {
+  if (annotation.anchor.kind !== "transcript")
+    return;
+  const at = annotation.anchor.start;
+  await app.workspace.getLeaf(false).openFile(file);
+  for (let i = 0; i < 40; i++) {
+    const media = document.querySelector(".mt-view video, .mt-view audio");
+    if (media instanceof HTMLMediaElement) {
+      const seek = () => {
+        media.currentTime = at;
+      };
+      if (media.readyState > 0)
+        seek();
+      else
+        media.addEventListener("loadedmetadata", seek, { once: true });
+      void media.play();
+      const painted = document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`);
+      if (painted instanceof HTMLElement) {
+        painted.scrollIntoView({ behavior: "smooth", block: "center" });
+        flash(painted);
+      }
+      return;
+    }
+    await new Promise((r) => window.setTimeout(r, 50));
+  }
+}
 async function revealInMarkdown(app, file, annotation) {
   const leaf = app.workspace.getLeaf(false);
   await leaf.openFile(file);
@@ -562,7 +595,7 @@ var ReviewView = class extends import_obsidian4.ItemView {
     const file = this.app.vault.getAbstractFileByPath(targetPath);
     if (!(file instanceof import_obsidian4.TFile))
       return;
-    await revealInMarkdown(this.app, file, annotation);
+    await reveal(this.app, file, annotation);
     await this.plugin.markReviewed({ targetPath, annotation });
   }
 };
@@ -1143,40 +1176,27 @@ function repaintEditors(app) {
   });
 }
 
-// src/hosts/markdown/readingMode.ts
-function readingModeHighlighter(provider) {
-  return (el, ctx) => {
-    const annotations = provider(ctx.sourcePath);
-    if (annotations.length === 0)
-      return;
-    for (const a of annotations) {
-      if (a.anchor.kind !== "markdown")
-        continue;
-      paint(el, a);
-    }
-  };
-}
-function paint(root, a) {
-  const needle = a.anchor.quote;
-  if (!needle)
+// src/hosts/paintQuote.ts
+function paintQuote(root, annotation, quote = annotation.anchor.quote) {
+  if (!quote)
     return;
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const targets = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const text = n;
-    if (text.data.includes(needle) && !isInsideHighlight(text))
+    if (text.data.includes(quote) && !isInsideHighlight(text))
       targets.push(text);
   }
   for (const node of targets) {
-    const at = node.data.indexOf(needle);
+    const at = node.data.indexOf(quote);
     if (at < 0)
       continue;
     const tail = node.splitText(at);
-    tail.splitText(needle.length);
+    tail.splitText(quote.length);
     const span = document.createElement("span");
-    span.className = isComment(a) ? "at-hl at-hl-comment" : "at-hl";
-    span.style.setProperty("--at-color", a.color);
-    span.dataset.atId = a.id;
+    span.className = isComment(annotation) ? "at-hl at-hl-comment" : "at-hl";
+    span.style.setProperty("--at-color", annotation.color);
+    span.dataset.atId = annotation.id;
     tail.replaceWith(span);
     span.appendChild(tail);
   }
@@ -1186,11 +1206,354 @@ function isInsideHighlight(node) {
   return ((_a = node.parentElement) == null ? void 0 : _a.closest(".at-hl")) != null;
 }
 
+// src/hosts/markdown/readingMode.ts
+function readingModeHighlighter(provider) {
+  return (el, ctx) => {
+    const annotations = provider(ctx.sourcePath);
+    if (annotations.length === 0)
+      return;
+    for (const a of annotations) {
+      if (a.anchor.kind !== "markdown")
+        continue;
+      paintQuote(el, a);
+    }
+  };
+}
+
+// src/hosts/transcript/TranscriptHost.ts
+var import_obsidian8 = require("obsidian");
+
+// src/anchor/transcriptAnchor.ts
+var TIME_TOLERANCE_S = 3;
+function describeTranscript(seg, charStart, charEnd, track, contextLen = 32) {
+  return {
+    kind: "transcript",
+    track,
+    seg: seg.seg,
+    start: seg.start,
+    charStart,
+    charEnd,
+    quote: seg.text.slice(charStart, charEnd),
+    prefix: seg.text.slice(Math.max(0, charStart - contextLen), charStart),
+    suffix: seg.text.slice(charEnd, charEnd + contextLen)
+  };
+}
+function commonSuffixLen2(a, b) {
+  let n = 0;
+  while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n])
+    n++;
+  return n;
+}
+function commonPrefixLen2(a, b) {
+  let n = 0;
+  while (n < a.length && n < b.length && a[n] === b[n])
+    n++;
+  return n;
+}
+function resolveTranscript(segs, anchor, currentTrack) {
+  if (!anchor.quote)
+    return null;
+  const sameTrack = currentTrack != null && currentTrack === anchor.track;
+  if (sameTrack) {
+    const seg = segs.find((s) => s.seg === anchor.seg);
+    if (seg) {
+      if (seg.text.slice(anchor.charStart, anchor.charEnd) === anchor.quote) {
+        return { seg: seg.seg, charStart: anchor.charStart, charEnd: anchor.charEnd, how: "exact" };
+      }
+      const at = seg.text.indexOf(anchor.quote);
+      if (at >= 0) {
+        return { seg: seg.seg, charStart: at, charEnd: at + anchor.quote.length, how: "drifted" };
+      }
+    }
+  }
+  const near = segs.filter((s) => Math.abs(s.start - anchor.start) <= TIME_TOLERANCE_S);
+  const scored = [];
+  for (const s of near) {
+    const at = s.text.indexOf(anchor.quote);
+    if (at < 0)
+      continue;
+    scored.push({
+      seg: s,
+      at,
+      score: commonSuffixLen2(s.text.slice(0, at), anchor.prefix) + commonPrefixLen2(s.text.slice(at + anchor.quote.length), anchor.suffix)
+    });
+  }
+  if (scored.length > 0) {
+    scored.sort((a, b) => b.score - a.score || Math.abs(a.seg.start - anchor.start) - Math.abs(b.seg.start - anchor.start));
+    const best = scored[0];
+    return {
+      seg: best.seg.seg,
+      charStart: best.at,
+      charEnd: best.at + anchor.quote.length,
+      how: "retimed"
+    };
+  }
+  const everywhere = segs.filter((s) => s.text.includes(anchor.quote));
+  if (everywhere.length === 1) {
+    const s = everywhere[0];
+    const at = s.text.indexOf(anchor.quote);
+    return { seg: s.seg, charStart: at, charEnd: at + anchor.quote.length, how: "unique" };
+  }
+  return null;
+}
+
+// src/hosts/transcript/TranscriptHost.ts
+var TRANSCRIPT_RENDERED = "mt:transcript-rendered";
+var TranscriptHost = class {
+  constructor(app, plugin, store, settings) {
+    this.app = app;
+    this.plugin = plugin;
+    this.store = store;
+    this.settings = settings;
+    this.bubble = new CommentBubble();
+    /** The transcript currently on screen, from the last render announcement. */
+    this.current = null;
+    this.popover = new SelectionPopover(settings.colors);
+  }
+  register() {
+    const onRendered = (e) => {
+      var _a, _b;
+      const detail = e.detail;
+      if (!(detail == null ? void 0 : detail.mediaPath))
+        return;
+      this.current = { mediaPath: detail.mediaPath, trackPath: (_a = detail.trackPath) != null ? _a : null };
+      const panel = e.target instanceof HTMLElement ? (_b = e.target.querySelector(".mt-transcript")) != null ? _b : e.target : null;
+      if (panel instanceof HTMLElement)
+        void this.repaint(panel, detail.mediaPath);
+    };
+    document.addEventListener(TRANSCRIPT_RENDERED, onRendered);
+    this.plugin.register(() => document.removeEventListener(TRANSCRIPT_RENDERED, onRendered));
+    this.plugin.register(this.store.onChange((path) => {
+      var _a;
+      if (((_a = this.current) == null ? void 0 : _a.mediaPath) === path)
+        this.repaintOpenPanels(path);
+    }));
+    this.plugin.registerDomEvent(document, "mouseup", (e) => {
+      if (e.button !== 0 || !this.settings.popoverOnSelection)
+        return;
+      if (!this.inTranscript(e.target))
+        return;
+      if (e.target instanceof HTMLElement && e.target.closest(".at-hl, .at-popover, .at-bubble"))
+        return;
+      window.setTimeout(() => {
+        void this.onSelectionMade();
+      }, 0);
+    });
+    this.plugin.registerDomEvent(document, "click", (e) => {
+      var _a, _b;
+      const hit = e.target instanceof HTMLElement ? e.target.closest(".at-hl") : null;
+      if (!(hit instanceof HTMLElement) || !this.inTranscript(hit))
+        return;
+      if (((_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim().length) != null ? _b : 0) > 0)
+        return;
+      void this.showBubble(hit);
+    });
+    this.plugin.registerDomEvent(document, "contextmenu", (e) => {
+      var _a, _b;
+      if (!this.inTranscript(e.target))
+        return;
+      const hit = e.target instanceof HTMLElement ? e.target.closest(".at-hl") : null;
+      const selected = (_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim()) != null ? _b : "";
+      if (!hit && selected.length === 0)
+        return;
+      e.preventDefault();
+      void this.showMenu(e, hit instanceof HTMLElement ? hit : null);
+    });
+  }
+  detach() {
+    this.popover.hide();
+    this.bubble.hide();
+  }
+  inTranscript(target) {
+    return target instanceof HTMLElement && target.closest(".mt-transcript") != null;
+  }
+  // ── Painting ───────────────────────────────────────────────────────────────
+  /** Read the transcript out of the DOM the other plugin rendered. */
+  readSegments(panel) {
+    const out = [];
+    for (const el of Array.from(panel.querySelectorAll(".mt-segment"))) {
+      if (!(el instanceof HTMLElement))
+        continue;
+      const txt = el.querySelector(".mt-txt");
+      const seg = Number(el.dataset.mtSeg);
+      const start = Number(el.dataset.mtStart);
+      if (!(txt instanceof HTMLElement) || !Number.isFinite(seg))
+        continue;
+      out.push({ el, txt, seg: { seg, start, text: txt.innerText } });
+    }
+    return out;
+  }
+  async repaint(panel, mediaPath) {
+    var _a, _b;
+    const lines = this.readSegments(panel);
+    if (lines.length === 0)
+      return;
+    const data = await this.store.get(mediaPath);
+    const segs = lines.map((l) => l.seg);
+    const track = (_b = (_a = this.current) == null ? void 0 : _a.trackPath) != null ? _b : null;
+    for (const a of data.annotations) {
+      if (a.anchor.kind !== "transcript")
+        continue;
+      const hit = resolveTranscript(segs, a.anchor, track);
+      if (!hit)
+        continue;
+      const line = lines.find((l) => l.seg.seg === hit.seg);
+      if (line)
+        paintQuote(line.txt, a, line.seg.text.slice(hit.charStart, hit.charEnd));
+    }
+  }
+  repaintOpenPanels(mediaPath) {
+    for (const panel of Array.from(document.querySelectorAll(".mt-transcript"))) {
+      if (panel instanceof HTMLElement)
+        void this.repaint(panel, mediaPath);
+    }
+  }
+  // ── Capture ────────────────────────────────────────────────────────────────
+  /** Turn the current selection into an anchor, if it sits inside one line. */
+  capture() {
+    var _a, _b, _c;
+    const selection = window.getSelection();
+    const selected = (_a = selection == null ? void 0 : selection.toString()) != null ? _a : "";
+    if (!selection || selected.trim().length === 0 || !this.current)
+      return null;
+    const node = selection.anchorNode;
+    const el = (_b = node instanceof HTMLElement ? node : node == null ? void 0 : node.parentElement) != null ? _b : null;
+    const segEl = el == null ? void 0 : el.closest(".mt-segment");
+    const txt = segEl == null ? void 0 : segEl.querySelector(".mt-txt");
+    if (!(segEl instanceof HTMLElement) || !(txt instanceof HTMLElement))
+      return null;
+    const text = txt.innerText;
+    const at = text.indexOf(selected);
+    if (at < 0) {
+      new import_obsidian8.Notice("Attention: select within a single transcript line.");
+      return null;
+    }
+    const seg = {
+      seg: Number(segEl.dataset.mtSeg),
+      start: Number(segEl.dataset.mtStart),
+      text
+    };
+    return {
+      anchor: describeTranscript(seg, at, at + selected.length, (_c = this.current.trackPath) != null ? _c : ""),
+      mediaPath: this.current.mediaPath
+    };
+  }
+  async onSelectionMade() {
+    const captured = this.capture();
+    if (!captured)
+      return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0)
+      return;
+    this.popover.showAt(selection.getRangeAt(0).getBoundingClientRect(), {
+      onHighlight: (color) => {
+        void this.create(captured.mediaPath, captured.anchor, color, null);
+      },
+      onComment: () => {
+        new CommentModal(this.app, captured.anchor.quote, "", (body) => {
+          void this.create(captured.mediaPath, captured.anchor, this.settings.defaultColor, body || null);
+        }).open();
+      }
+    });
+  }
+  async showMenu(e, hit) {
+    var _a;
+    const menu = new import_obsidian8.Menu();
+    if (hit) {
+      const mediaPath = (_a = this.current) == null ? void 0 : _a.mediaPath;
+      const id = hit.dataset.atId;
+      if (!mediaPath || !id)
+        return;
+      menu.addItem((i) => i.setTitle("Edit comment\u2026").setIcon("message-square").onClick(() => {
+        void this.editComment(mediaPath, id);
+      }));
+      menu.addItem((i) => i.setTitle("Change colour\u2026").setIcon("palette").onClick(() => {
+        this.popover.showAt(hit.getBoundingClientRect(), {
+          onHighlight: (color) => {
+            void this.store.update(mediaPath, id, { color });
+          },
+          onComment: () => {
+            void this.editComment(mediaPath, id);
+          }
+        });
+      }));
+      menu.addItem((i) => i.setTitle("Remove highlight").setIcon("trash").setWarning(true).onClick(() => {
+        void this.store.remove(mediaPath, id);
+      }));
+    } else {
+      const captured = this.capture();
+      if (!captured)
+        return;
+      menu.addItem((i) => i.setTitle("Highlight").setIcon("highlighter").onClick(() => {
+        void this.create(captured.mediaPath, captured.anchor, this.settings.defaultColor, null);
+      }));
+      menu.addItem((i) => i.setTitle("Comment\u2026").setIcon("message-square").onClick(() => {
+        new CommentModal(this.app, captured.anchor.quote, "", (body) => {
+          void this.create(captured.mediaPath, captured.anchor, this.settings.defaultColor, body || null);
+        }).open();
+      }));
+    }
+    menu.showAtMouseEvent(e);
+  }
+  // ── Actions ────────────────────────────────────────────────────────────────
+  async showBubble(el) {
+    var _a;
+    const mediaPath = (_a = this.current) == null ? void 0 : _a.mediaPath;
+    const id = el.dataset.atId;
+    if (!mediaPath || !id)
+      return;
+    const data = await this.store.get(mediaPath);
+    const annotation = data.annotations.find((a) => a.id === id);
+    if (!annotation)
+      return;
+    this.bubble.showFor(el.getBoundingClientRect(), annotation.body, {
+      onEdit: () => {
+        void this.editComment(mediaPath, id);
+      },
+      onRecolour: () => {
+        this.popover.showAt(el.getBoundingClientRect(), {
+          onHighlight: (color) => {
+            void this.store.update(mediaPath, id, { color });
+          },
+          onComment: () => {
+            void this.editComment(mediaPath, id);
+          }
+        });
+      },
+      onRemove: () => {
+        void this.store.remove(mediaPath, id);
+      }
+    });
+  }
+  async editComment(mediaPath, id) {
+    var _a;
+    const data = await this.store.get(mediaPath);
+    const annotation = data.annotations.find((a) => a.id === id);
+    if (!annotation)
+      return;
+    new CommentModal(this.app, annotation.anchor.quote, (_a = annotation.body) != null ? _a : "", (body) => {
+      void this.store.update(mediaPath, id, { body: body || null });
+    }).open();
+  }
+  async create(mediaPath, anchor, color, body) {
+    const annotation = {
+      id: newId(),
+      anchor,
+      color,
+      body,
+      created: new Date().toISOString(),
+      reviewed: []
+    };
+    await this.store.add(mediaPath, annotation);
+  }
+};
+
 // src/main.ts
-var AttentionPlugin = class extends import_obsidian8.Plugin {
+var AttentionPlugin = class extends import_obsidian9.Plugin {
   constructor() {
     super(...arguments);
     this.markdownHost = null;
+    this.transcriptHost = null;
     /**
      * Show the panel. `focus: false` is used when opening it on the user's behalf
      * — revealing a sidebar is helpful, stealing the cursor mid-sentence is not.
@@ -1205,6 +1568,10 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
     this.applyMarkStyle();
     if (this.settings.enableMarkdownHost)
       this.setupMarkdownHost();
+    if (this.settings.enableTranscriptHost) {
+      this.transcriptHost = new TranscriptHost(this.app, this, this.store, this.settings);
+      this.transcriptHost.register();
+    }
     this.register(this.store.onChange(() => {
       repaintEditors(this.app);
       this.rerenderReadingViews();
@@ -1246,7 +1613,7 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
   async warmOpenFiles() {
     const paths = /* @__PURE__ */ new Set();
     this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
-      const file = leaf.view instanceof import_obsidian8.MarkdownView ? leaf.view.file : null;
+      const file = leaf.view instanceof import_obsidian9.MarkdownView ? leaf.view.file : null;
       if (file)
         paths.add(file.path);
     });
@@ -1271,7 +1638,7 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
   rerenderReadingViews() {
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (view instanceof import_obsidian8.MarkdownView && view.getMode() === "preview") {
+      if (view instanceof import_obsidian9.MarkdownView && view.getMode() === "preview") {
         view.previewMode.rerender(true);
       }
     }
@@ -1307,7 +1674,7 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
     await leaf.loadIfDeferred();
     await this.app.workspace.revealLeaf(leaf);
     if (!focus) {
-      const editor = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+      const editor = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
       if (editor)
         this.app.workspace.setActiveLeaf(editor.leaf, { focus: true });
     }
@@ -1327,10 +1694,10 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
    * is a sibling, so it travels with the folder — only a file's own rename does.
    */
   async handleRename(file, oldPath) {
-    if (!(file instanceof import_obsidian8.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian9.TFile) || isSidecarPath(file.path))
       return;
     const old = this.app.vault.getAbstractFileByPath(sidecarPathFor(oldPath));
-    if (!(old instanceof import_obsidian8.TFile))
+    if (!(old instanceof import_obsidian9.TFile))
       return;
     const nextPath = sidecarPathFor(file.path);
     if (old.path === nextPath)
@@ -1343,25 +1710,26 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
       this.index.renameFile(oldPath, file.path);
       this.refreshReviewViews();
     } catch (e) {
-      new import_obsidian8.Notice(`Attention: could not move annotations for ${file.name}`);
+      new import_obsidian9.Notice(`Attention: could not move annotations for ${file.name}`);
       console.error(e);
     }
   }
   async handleDelete(file) {
-    if (!(file instanceof import_obsidian8.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian9.TFile) || isSidecarPath(file.path))
       return;
     if (this.settings.keepOrphanedSidecars)
       return;
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
-    if (sidecar instanceof import_obsidian8.TFile)
+    if (sidecar instanceof import_obsidian9.TFile)
       await this.app.fileManager.trashFile(sidecar);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);
     this.refreshReviewViews();
   }
   onunload() {
-    var _a;
+    var _a, _b;
     (_a = this.markdownHost) == null ? void 0 : _a.detach();
+    (_b = this.transcriptHost) == null ? void 0 : _b.detach();
     document.body.removeClass("at-style-background");
   }
   async loadSettings() {

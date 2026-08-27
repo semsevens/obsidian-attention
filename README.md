@@ -53,9 +53,18 @@ comment get a little more weight. Switch to a background fill in settings.
 
 ## Status
 
-Early. The storage layer, the attention index and the review panel work; the
-capture surfaces (markdown and transcript) are not implemented yet — see
-[`docs/architecture.md`](docs/architecture.md) for the design and what's left.
+Working: markdown notes and — when
+[Media Transcript](https://github.com/semsevens/obsidian-media-transcript) is
+installed — its transcript panel. Marking a transcript line records the moment
+it happens at, so the review panel can put you back there: clicking the entry
+seeks the player and plays.
+
+Transcript marks belong to the media file rather than to a subtitle track, and
+are re-found by timestamp and quote, so re-transcribing with a different engine
+doesn't orphan them.
+
+See [`docs/architecture.md`](docs/architecture.md) for the design and what's
+still open.
 
 ## How it stores things
 

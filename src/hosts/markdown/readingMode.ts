@@ -1,6 +1,6 @@
 import { MarkdownPostProcessorContext } from 'obsidian';
-import { Annotation, isComment } from '../../model';
 import { Provider } from './decorations';
+import { paintQuote } from '../paintQuote';
 
 /**
  * Highlights for reading mode.
@@ -20,39 +20,7 @@ export function readingModeHighlighter(provider: Provider) {
     if (annotations.length === 0) return;
     for (const a of annotations) {
       if (a.anchor.kind !== 'markdown') continue;
-      paint(el, a);
+      paintQuote(el, a);
     }
   };
-}
-
-function paint(root: HTMLElement, a: Annotation): void {
-  const needle = a.anchor.quote;
-  if (!needle) return;
-
-  // Collect first: wrapping mutates the tree the walker is traversing.
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const targets: Text[] = [];
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    const text = n as Text;
-    if (text.data.includes(needle) && !isInsideHighlight(text)) targets.push(text);
-  }
-
-  for (const node of targets) {
-    const at = node.data.indexOf(needle);
-    if (at < 0) continue;
-    const tail = node.splitText(at);
-    tail.splitText(needle.length);
-
-    const span = document.createElement('span');
-    span.className = isComment(a) ? 'at-hl at-hl-comment' : 'at-hl';
-    span.style.setProperty('--at-color', a.color);
-    span.dataset.atId = a.id;
-    tail.replaceWith(span);
-    span.appendChild(tail);
-  }
-}
-
-/** Don't nest one highlight inside another when two annotations overlap. */
-function isInsideHighlight(node: Node): boolean {
-  return node.parentElement?.closest('.at-hl') != null;
 }
