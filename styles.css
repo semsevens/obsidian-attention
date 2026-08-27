@@ -48,6 +48,19 @@
   cursor: pointer;
 }
 
+/* Sort control sits under the tabs, not beside them: the header is already
+   carrying two controls and a third would crowd a narrow sidebar. */
+.at-sortbar {
+  padding: 4px 0 2px;
+}
+
+.at-sort {
+  width: 100%;
+  font-size: var(--font-ui-smaller);
+  height: auto;
+  padding: 3px 6px;
+}
+
 .at-bucket-title {
   font-size: var(--font-ui-smaller);
   text-transform: uppercase;
@@ -209,7 +222,45 @@ body.at-style-background .at-hl:hover {
 }
 
 .at-entry {
+  position: relative;
   border-left-color: var(--at-color, var(--text-accent));
+}
+
+/* Row actions stay out of the way until you're pointing at the entry, so a
+   long list reads as a list rather than a control panel. */
+.at-entry-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: none;
+  gap: 2px;
+  background: var(--background-secondary);
+  border-radius: 4px;
+  padding: 1px;
+}
+
+.at-entry:hover .at-entry-actions,
+.at-entry:focus-within .at-entry-actions {
+  display: flex;
+}
+
+.at-icon-btn {
+  padding: 1px 5px;
+  height: 20px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  background: transparent;
+  box-shadow: none;
+}
+
+.at-icon-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.at-icon-btn.mod-warning:hover {
+  background: var(--background-modifier-error);
+  color: var(--text-on-accent);
 }
 
 /* Briefly ring an annotation the review panel jumped to. */

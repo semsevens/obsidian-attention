@@ -1,10 +1,12 @@
-import { ItemView, WorkspaceLeaf, TFile } from 'obsidian';
+import { ItemView, Menu, WorkspaceLeaf, TFile } from 'obsidian';
 import type AttentionPlugin from '../main';
 import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
 import { Annotation, isComment, lastMarked } from '../model';
+import { Sort, SORT_LABELS, sortsFor, resolveSort, sortAnnotations } from '../store/sorting';
 import { inDocumentOrder } from '../store/documentOrder';
 import { reveal } from '../hosts/markdown/reveal';
 import { formatWhen } from '../ui/time';
+import { CommentModal } from '../ui/CommentModal';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
 
@@ -18,10 +20,9 @@ const BUCKET_LABELS: Record<Bucket, string> = {
 /**
  * Two ways of looking at the same annotations.
  *
- *   This note — an outline, in *document* order, for finding your way around
- *     what you marked here.
- *   All — the review surface, in *time* order across the vault, for running
- *     into things again.
+ *   This note — what you marked here, in document order by default.
+ *   All — across the vault, grouped by how long ago, for running into things
+ *     again.
  *
  * They share a panel rather than taking two slots in the sidebar, because the
  * rendering is identical and only the question differs.
@@ -32,6 +33,7 @@ type Lens = 'file' | 'all';
 
 export class ReviewView extends ItemView {
   private lens: Lens = 'file';
+  private sort: Sort = 'document';
   /**
    * Bumped on every render. Rendering empties the panel, then awaits a file
    * read before appending; two overlapping calls would each empty and then each
@@ -54,8 +56,9 @@ export class ReviewView extends ItemView {
     await this.render();
   }
 
-  /** Re-render. Safe to call from anywhere; it reads current state itself. */
   async render(): Promise<void> {
+    // Painting a view Obsidian hasn't finished mounting is wasted work; onOpen
+    // renders once we're attached.
     const seq = ++this.generation;
     const root = this.contentEl;
     root.empty();
@@ -81,6 +84,9 @@ export class ReviewView extends ItemView {
       if (this.lens === lens && !this.resurfaced) el.addClass('is-active');
       el.addEventListener('click', () => {
         this.lens = lens;
+        // Document order means nothing across files; fall back rather than
+        // showing an arbitrary order under a label that promises one.
+        this.sort = resolveSort(this.sort, lens);
         this.resurfaced = null;
         void this.render();
       });
@@ -94,6 +100,21 @@ export class ReviewView extends ItemView {
       this.resurfaced = this.resurfaced
         ? null
         : this.plugin.index.resurface(this.plugin.settings.resurfaceCount, () => Math.random());
+      void this.render();
+    });
+
+    if (!this.resurfaced) this.renderSortControl(root);
+  }
+
+  private renderSortControl(root: HTMLElement): void {
+    const bar = root.createDiv('at-sortbar');
+    const select = bar.createEl('select', { cls: 'at-sort dropdown' });
+    for (const s of sortsFor(this.lens)) {
+      select.createEl('option', { text: SORT_LABELS[s], attr: { value: s } });
+    }
+    select.value = this.sort;
+    select.addEventListener('change', () => {
+      this.sort = select.value as Sort;
       void this.render();
     });
   }
@@ -114,9 +135,12 @@ export class ReviewView extends ItemView {
       return;
     }
 
-    // An outline follows the document, not the order things were made in.
-    const ordered = await inDocumentOrder(this.app, file, data.annotations);
+    const ordered = this.sort === 'document'
+      ? await inDocumentOrder(this.app, file, data.annotations)
+      : sortAnnotations(data.annotations.map(annotation => ({ annotation })), this.sort)
+          .map(x => x.annotation);
     if (seq !== this.generation) return;
+
     root.createDiv('at-bucket-title').setText(`${ordered.length} in this note`);
     for (const a of ordered) this.renderEntry(root, a, file.path);
   }
@@ -124,14 +148,22 @@ export class ReviewView extends ItemView {
   // ── All ────────────────────────────────────────────────────────────────────
 
   private renderAll(root: HTMLElement): void {
-    const buckets = this.plugin.index.buckets();
-    const total = this.plugin.index.all().length;
-
-    if (total === 0) {
-      this.empty(root, 'Nothing marked yet. Select text in a note to highlight it.');
+    const all = this.plugin.index.all();
+    if (all.length === 0) {
+      this.empty(root, 'Nothing marked yet. Select text in a note to mark it.');
       return;
     }
 
+    // Only the default ordering is grouped by age; asking for another order
+    // and still getting time headings would be answering a different question.
+    if (this.sort !== 'recent') {
+      const sorted = sortAnnotations(all, this.sort);
+      root.createDiv('at-bucket-title').setText(`${sorted.length} marked`);
+      for (const e of sorted) this.renderEntry(root, e.annotation, e.targetPath);
+      return;
+    }
+
+    const buckets = this.plugin.index.buckets();
     for (const key of BUCKET_ORDER) {
       const entries = buckets[key];
       if (entries.length === 0) continue;
@@ -148,6 +180,7 @@ export class ReviewView extends ItemView {
 
   private renderEntry(root: HTMLElement, annotation: Annotation, targetPath: string): void {
     const el = root.createDiv('at-entry');
+
     el.createDiv('at-quote').setText(annotation.anchor.quote);
     if (isComment(annotation)) {
       el.createDiv('at-body').setText(annotation.body ?? '');
@@ -167,12 +200,48 @@ export class ReviewView extends ItemView {
       meta.createSpan({ text: `${annotation.hits.length}×`, cls: 'at-hits' });
     }
 
+    // Acting on a mark from the list, rather than having to find it in the note
+    // first. Revealed on hover so a long list stays quiet.
+    const actions = el.createDiv('at-entry-actions');
+    const act = (label: string, title: string, fn: () => void, warn = false) => {
+      const b = actions.createEl('button', { cls: 'at-icon-btn', text: label });
+      b.setAttribute('aria-label', title);
+      b.setAttribute('title', title);
+      if (warn) b.addClass('mod-warning');
+      b.addEventListener('click', e => {
+        e.stopPropagation();   // the entry itself jumps to the passage
+        fn();
+      });
+    };
+    act('💬', isComment(annotation) ? 'Edit comment' : 'Add a comment',
+        () => this.editComment(targetPath, annotation));
+    act('✕', 'Remove this mark',
+        () => { void this.plugin.store.remove(targetPath, annotation.id); }, true);
+
     el.addEventListener('click', () => { void this.jumpTo(annotation, targetPath); });
+    el.addEventListener('contextmenu', e => this.entryMenu(e, annotation, targetPath));
   }
 
-  // Named jumpTo, not open: View.prototype.open is what Obsidian calls to mount
-  // a view, and shadowing it leaves the view constructed but never attached —
-  // a panel that renders correctly into an element that is not in the document.
+  private entryMenu(e: MouseEvent, annotation: Annotation, targetPath: string): void {
+    e.preventDefault();
+    const menu = new Menu();
+    menu.addItem(i => i.setTitle('Go to').setIcon('arrow-right')
+      .onClick(() => { void this.jumpTo(annotation, targetPath); }));
+    menu.addItem(i => i.setTitle(isComment(annotation) ? 'Edit comment…' : 'Add a comment…')
+      .setIcon('message-square').onClick(() => this.editComment(targetPath, annotation)));
+    menu.addItem(i => i.setTitle('Copy text').setIcon('copy')
+      .onClick(() => { void navigator.clipboard.writeText(annotation.anchor.quote); }));
+    menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
+      .onClick(() => { void this.plugin.store.remove(targetPath, annotation.id); }));
+    menu.showAtMouseEvent(e);
+  }
+
+  private editComment(targetPath: string, annotation: Annotation): void {
+    new CommentModal(this.app, annotation.anchor.quote, annotation.body ?? '', body => {
+      void this.plugin.store.update(targetPath, annotation.id, { body: body || null });
+    }).open();
+  }
+
   private async jumpTo(annotation: Annotation, targetPath: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(targetPath);
     if (!(file instanceof TFile)) return;

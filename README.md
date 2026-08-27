@@ -38,7 +38,10 @@ annotations:
 - **All** — across the vault, grouped by how long ago, with a **Resurface**
   button that brings back a handful you haven't revisited
 
-Clicking an entry jumps to the passage and flashes it. The panel appears on its
+Sort either view by document position, when it was last or first marked, or how
+many times it caught you. Hovering an entry reveals buttons to comment on or
+remove that mark without going to find it first; right-click gives the full
+menu. Clicking an entry jumps to the passage and flashes it. The panel appears on its
 own when you open a note that has annotations, and stays out of the way when you
 open one that doesn't.
 

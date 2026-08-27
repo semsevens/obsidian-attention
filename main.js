@@ -185,6 +185,10 @@ function targetPathFor(sidecarPath) {
 var import_obsidian3 = require("obsidian");
 
 // src/model.ts
+function firstMarked(a) {
+  var _a;
+  return (_a = a.hits[0]) != null ? _a : "";
+}
 function lastMarked(a) {
   var _a;
   return (_a = a.hits[a.hits.length - 1]) != null ? _a : "";
@@ -330,7 +334,34 @@ var AttentionIndex = class {
 };
 
 // src/views/ReviewView.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
+
+// src/store/sorting.ts
+var SORT_LABELS = {
+  recent: "Recently marked",
+  marks: "Times marked",
+  oldest: "First marked",
+  document: "Document order"
+};
+function sortsFor(lens) {
+  return lens === "file" ? ["document", "recent", "marks", "oldest"] : ["recent", "marks", "oldest"];
+}
+function resolveSort(sort, lens) {
+  return sortsFor(lens).includes(sort) ? sort : "recent";
+}
+function sortAnnotations(items, sort) {
+  const out = [...items];
+  switch (sort) {
+    case "recent":
+      return out.sort((a, b) => lastMarked(b.annotation).localeCompare(lastMarked(a.annotation)));
+    case "oldest":
+      return out.sort((a, b) => firstMarked(a.annotation).localeCompare(firstMarked(b.annotation)));
+    case "marks":
+      return out.sort((a, b) => b.annotation.hits.length - a.annotation.hits.length || lastMarked(b.annotation).localeCompare(lastMarked(a.annotation)));
+    default:
+      return out;
+  }
+}
 
 // src/anchor/textQuote.ts
 var CONTEXT_LEN = 32;
@@ -518,6 +549,45 @@ function flash(el) {
   window.setTimeout(() => el.removeClass("at-flash"), 1300);
 }
 
+// src/ui/CommentModal.ts
+var import_obsidian5 = require("obsidian");
+var CommentModal = class extends import_obsidian5.Modal {
+  constructor(app, quote, initial, onSubmit) {
+    super(app);
+    this.quote = quote;
+    this.onSubmit = onSubmit;
+    this.value = initial;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("at-comment-modal");
+    contentEl.createDiv("at-comment-quote").setText(this.quote);
+    const input = contentEl.createEl("textarea", { cls: "at-comment-input" });
+    input.value = this.value;
+    input.placeholder = "What caught your attention?";
+    input.addEventListener("input", () => {
+      this.value = input.value;
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        this.submit();
+      }
+    });
+    new import_obsidian5.Setting(contentEl).addButton(
+      (b) => b.setButtonText("Save").setCta().onClick(() => this.submit())
+    );
+    window.setTimeout(() => input.focus(), 0);
+  }
+  submit() {
+    this.onSubmit(this.value.trim());
+    this.close();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
 // src/views/ReviewView.ts
 var VIEW_TYPE_REVIEW = "attention-review";
 var BUCKET_LABELS = {
@@ -526,11 +596,12 @@ var BUCKET_LABELS = {
   month: "This month",
   older: "Earlier"
 };
-var ReviewView = class extends import_obsidian5.ItemView {
+var ReviewView = class extends import_obsidian6.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
     this.lens = "file";
+    this.sort = "document";
     /**
      * Bumped on every render. Rendering empties the panel, then awaits a file
      * read before appending; two overlapping calls would each empty and then each
@@ -555,7 +626,6 @@ var ReviewView = class extends import_obsidian5.ItemView {
     }));
     await this.render();
   }
-  /** Re-render. Safe to call from anywhere; it reads current state itself. */
   async render() {
     const seq = ++this.generation;
     const root = this.contentEl;
@@ -581,6 +651,7 @@ var ReviewView = class extends import_obsidian5.ItemView {
         el.addClass("is-active");
       el.addEventListener("click", () => {
         this.lens = lens;
+        this.sort = resolveSort(this.sort, lens);
         this.resurfaced = null;
         void this.render();
       });
@@ -592,6 +663,20 @@ var ReviewView = class extends import_obsidian5.ItemView {
       resurface.addClass("is-active");
     resurface.addEventListener("click", () => {
       this.resurfaced = this.resurfaced ? null : this.plugin.index.resurface(this.plugin.settings.resurfaceCount, () => Math.random());
+      void this.render();
+    });
+    if (!this.resurfaced)
+      this.renderSortControl(root);
+  }
+  renderSortControl(root) {
+    const bar = root.createDiv("at-sortbar");
+    const select = bar.createEl("select", { cls: "at-sort dropdown" });
+    for (const s of sortsFor(this.lens)) {
+      select.createEl("option", { text: SORT_LABELS[s], attr: { value: s } });
+    }
+    select.value = this.sort;
+    select.addEventListener("change", () => {
+      this.sort = select.value;
       void this.render();
     });
   }
@@ -609,7 +694,7 @@ var ReviewView = class extends import_obsidian5.ItemView {
       this.empty(root, `Nothing marked in \u201C${file.basename}\u201D.`);
       return;
     }
-    const ordered = await inDocumentOrder(this.app, file, data.annotations);
+    const ordered = this.sort === "document" ? await inDocumentOrder(this.app, file, data.annotations) : sortAnnotations(data.annotations.map((annotation) => ({ annotation })), this.sort).map((x) => x.annotation);
     if (seq !== this.generation)
       return;
     root.createDiv("at-bucket-title").setText(`${ordered.length} in this note`);
@@ -618,12 +703,19 @@ var ReviewView = class extends import_obsidian5.ItemView {
   }
   // ── All ────────────────────────────────────────────────────────────────────
   renderAll(root) {
-    const buckets = this.plugin.index.buckets();
-    const total = this.plugin.index.all().length;
-    if (total === 0) {
-      this.empty(root, "Nothing marked yet. Select text in a note to highlight it.");
+    const all = this.plugin.index.all();
+    if (all.length === 0) {
+      this.empty(root, "Nothing marked yet. Select text in a note to mark it.");
       return;
     }
+    if (this.sort !== "recent") {
+      const sorted = sortAnnotations(all, this.sort);
+      root.createDiv("at-bucket-title").setText(`${sorted.length} marked`);
+      for (const e of sorted)
+        this.renderEntry(root, e.annotation, e.targetPath);
+      return;
+    }
+    const buckets = this.plugin.index.buckets();
     for (const key of BUCKET_ORDER) {
       const entries = buckets[key];
       if (entries.length === 0)
@@ -655,16 +747,60 @@ var ReviewView = class extends import_obsidian5.ItemView {
     if (annotation.hits.length > 1) {
       meta.createSpan({ text: `${annotation.hits.length}\xD7`, cls: "at-hits" });
     }
+    const actions = el.createDiv("at-entry-actions");
+    const act = (label, title, fn, warn = false) => {
+      const b = actions.createEl("button", { cls: "at-icon-btn", text: label });
+      b.setAttribute("aria-label", title);
+      b.setAttribute("title", title);
+      if (warn)
+        b.addClass("mod-warning");
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        fn();
+      });
+    };
+    act(
+      "\u{1F4AC}",
+      isComment(annotation) ? "Edit comment" : "Add a comment",
+      () => this.editComment(targetPath, annotation)
+    );
+    act(
+      "\u2715",
+      "Remove this mark",
+      () => {
+        void this.plugin.store.remove(targetPath, annotation.id);
+      },
+      true
+    );
     el.addEventListener("click", () => {
       void this.jumpTo(annotation, targetPath);
     });
+    el.addEventListener("contextmenu", (e) => this.entryMenu(e, annotation, targetPath));
   }
-  // Named jumpTo, not open: View.prototype.open is what Obsidian calls to mount
-  // a view, and shadowing it leaves the view constructed but never attached —
-  // a panel that renders correctly into an element that is not in the document.
+  entryMenu(e, annotation, targetPath) {
+    e.preventDefault();
+    const menu = new import_obsidian6.Menu();
+    menu.addItem((i) => i.setTitle("Go to").setIcon("arrow-right").onClick(() => {
+      void this.jumpTo(annotation, targetPath);
+    }));
+    menu.addItem((i) => i.setTitle(isComment(annotation) ? "Edit comment\u2026" : "Add a comment\u2026").setIcon("message-square").onClick(() => this.editComment(targetPath, annotation)));
+    menu.addItem((i) => i.setTitle("Copy text").setIcon("copy").onClick(() => {
+      void navigator.clipboard.writeText(annotation.anchor.quote);
+    }));
+    menu.addItem((i) => i.setTitle("Remove mark").setIcon("trash").setWarning(true).onClick(() => {
+      void this.plugin.store.remove(targetPath, annotation.id);
+    }));
+    menu.showAtMouseEvent(e);
+  }
+  editComment(targetPath, annotation) {
+    var _a;
+    new CommentModal(this.app, annotation.anchor.quote, (_a = annotation.body) != null ? _a : "", (body) => {
+      void this.plugin.store.update(targetPath, annotation.id, { body: body || null });
+    }).open();
+  }
   async jumpTo(annotation, targetPath) {
     const file = this.app.vault.getAbstractFileByPath(targetPath);
-    if (!(file instanceof import_obsidian5.TFile))
+    if (!(file instanceof import_obsidian6.TFile))
       return;
     await reveal(this.app, file, annotation);
     await this.plugin.markReviewed({ targetPath, annotation });
@@ -909,45 +1045,6 @@ var CommentBubble = class {
     document.removeEventListener("keydown", this.dismiss);
     (_a = this.el) == null ? void 0 : _a.remove();
     this.el = null;
-  }
-};
-
-// src/ui/CommentModal.ts
-var import_obsidian6 = require("obsidian");
-var CommentModal = class extends import_obsidian6.Modal {
-  constructor(app, quote, initial, onSubmit) {
-    super(app);
-    this.quote = quote;
-    this.onSubmit = onSubmit;
-    this.value = initial;
-  }
-  onOpen() {
-    const { contentEl } = this;
-    contentEl.addClass("at-comment-modal");
-    contentEl.createDiv("at-comment-quote").setText(this.quote);
-    const input = contentEl.createEl("textarea", { cls: "at-comment-input" });
-    input.value = this.value;
-    input.placeholder = "What caught your attention?";
-    input.addEventListener("input", () => {
-      this.value = input.value;
-    });
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        this.submit();
-      }
-    });
-    new import_obsidian6.Setting(contentEl).addButton(
-      (b) => b.setButtonText("Save").setCta().onClick(() => this.submit())
-    );
-    window.setTimeout(() => input.focus(), 0);
-  }
-  submit() {
-    this.onSubmit(this.value.trim());
-    this.close();
-  }
-  onClose() {
-    this.contentEl.empty();
   }
 };
 
