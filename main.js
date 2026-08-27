@@ -1306,28 +1306,21 @@ var TranscriptHost = class {
     this.store = store;
     this.settings = settings;
     this.bubble = new CommentBubble();
-    /** The transcript currently on screen, from the last render announcement. */
-    this.current = null;
     this.popover = new SelectionPopover(settings.colors);
   }
   register() {
     const onRendered = (e) => {
-      var _a, _b;
+      var _a;
       const detail = e.detail;
       if (!(detail == null ? void 0 : detail.mediaPath))
         return;
-      this.current = { mediaPath: detail.mediaPath, trackPath: (_a = detail.trackPath) != null ? _a : null };
-      const panel = e.target instanceof HTMLElement ? (_b = e.target.querySelector(".mt-transcript")) != null ? _b : e.target : null;
+      const panel = e.target instanceof HTMLElement ? (_a = e.target.querySelector(".mt-transcript")) != null ? _a : e.target : null;
       if (panel instanceof HTMLElement)
-        void this.repaint(panel, detail.mediaPath);
+        void this.repaint(panel);
     };
     document.addEventListener(TRANSCRIPT_RENDERED, onRendered);
     this.plugin.register(() => document.removeEventListener(TRANSCRIPT_RENDERED, onRendered));
-    this.plugin.register(this.store.onChange((path) => {
-      var _a;
-      if (((_a = this.current) == null ? void 0 : _a.mediaPath) === path)
-        this.repaintOpenPanels(path);
-    }));
+    this.plugin.register(this.store.onChange((path) => this.repaintOpenPanels(path)));
     this.plugin.registerDomEvent(document, "mouseup", (e) => {
       if (e.button !== 0 || !this.settings.popoverOnSelection)
         return;
@@ -1348,7 +1341,7 @@ var TranscriptHost = class {
         return;
       void this.showBubble(hit);
     });
-    this.plugin.registerDomEvent(document, "contextmenu", (e) => {
+    const onContextMenu = (e) => {
       var _a, _b;
       if (!this.inTranscript(e.target))
         return;
@@ -1357,15 +1350,37 @@ var TranscriptHost = class {
       if (!hit && selected.length === 0)
         return;
       e.preventDefault();
+      e.stopPropagation();
       void this.showMenu(e, hit instanceof HTMLElement ? hit : null);
-    });
+    };
+    document.addEventListener("contextmenu", onContextMenu, true);
+    this.plugin.register(() => document.removeEventListener("contextmenu", onContextMenu, true));
   }
   detach() {
     this.popover.hide();
     this.bubble.hide();
   }
   inTranscript(target) {
-    return target instanceof HTMLElement && target.closest(".mt-transcript") != null;
+    return this.panelOf(target) != null;
+  }
+  /**
+   * The transcript panel containing `target`, and what it is showing.
+   *
+   * Read from the DOM rather than remembered from the announcement: a plugin
+   * enabled while a transcript is already open never sees that event, and state
+   * kept only in a handler is state you can miss.
+   */
+  panelOf(target) {
+    var _a, _b;
+    if (!(target instanceof HTMLElement))
+      return null;
+    const panel = target.closest(".mt-transcript");
+    if (!(panel instanceof HTMLElement))
+      return null;
+    const mediaPath = (_a = panel.dataset.mtMedia) != null ? _a : "";
+    if (!mediaPath)
+      return null;
+    return { panel, mediaPath, trackPath: (_b = panel.dataset.mtTrack) != null ? _b : "" };
   }
   // ── Painting ───────────────────────────────────────────────────────────────
   /** Read the transcript out of the DOM the other plugin rendered. */
@@ -1383,14 +1398,17 @@ var TranscriptHost = class {
     }
     return out;
   }
-  async repaint(panel, mediaPath) {
-    var _a, _b;
+  async repaint(panel) {
+    var _a;
+    const mediaPath = panel.dataset.mtMedia;
+    if (!mediaPath)
+      return;
     const lines = this.readSegments(panel);
     if (lines.length === 0)
       return;
     const data = await this.store.get(mediaPath);
     const segs = lines.map((l) => l.seg);
-    const track = (_b = (_a = this.current) == null ? void 0 : _a.trackPath) != null ? _b : null;
+    const track = (_a = panel.dataset.mtTrack) != null ? _a : null;
     for (const a of data.annotations) {
       if (a.anchor.kind !== "transcript")
         continue;
@@ -1404,20 +1422,24 @@ var TranscriptHost = class {
   }
   repaintOpenPanels(mediaPath) {
     for (const panel of Array.from(document.querySelectorAll(".mt-transcript"))) {
-      if (panel instanceof HTMLElement)
-        void this.repaint(panel, mediaPath);
+      if (panel instanceof HTMLElement && panel.dataset.mtMedia === mediaPath) {
+        void this.repaint(panel);
+      }
     }
   }
   // ── Capture ────────────────────────────────────────────────────────────────
   /** Turn the current selection into an anchor, if it sits inside one line. */
   capture() {
-    var _a, _b, _c;
+    var _a, _b;
     const selection = window.getSelection();
     const selected = (_a = selection == null ? void 0 : selection.toString()) != null ? _a : "";
-    if (!selection || selected.trim().length === 0 || !this.current)
+    if (!selection || selected.trim().length === 0)
       return null;
     const node = selection.anchorNode;
     const el = (_b = node instanceof HTMLElement ? node : node == null ? void 0 : node.parentElement) != null ? _b : null;
+    const where = this.panelOf(el);
+    if (!where)
+      return null;
     const segEl = el == null ? void 0 : el.closest(".mt-segment");
     const txt = segEl == null ? void 0 : segEl.querySelector(".mt-txt");
     if (!(segEl instanceof HTMLElement) || !(txt instanceof HTMLElement))
@@ -1434,8 +1456,8 @@ var TranscriptHost = class {
       text
     };
     return {
-      anchor: describeTranscript(seg, at, at + selected.length, (_c = this.current.trackPath) != null ? _c : ""),
-      mediaPath: this.current.mediaPath
+      anchor: describeTranscript(seg, at, at + selected.length, where.trackPath),
+      mediaPath: where.mediaPath
     };
   }
   async onSelectionMade() {
@@ -1460,7 +1482,7 @@ var TranscriptHost = class {
     var _a;
     const menu = new import_obsidian8.Menu();
     if (hit) {
-      const mediaPath = (_a = this.current) == null ? void 0 : _a.mediaPath;
+      const mediaPath = (_a = this.panelOf(hit)) == null ? void 0 : _a.mediaPath;
       const id = hit.dataset.atId;
       if (!mediaPath || !id)
         return;
@@ -1498,7 +1520,7 @@ var TranscriptHost = class {
   // ── Actions ────────────────────────────────────────────────────────────────
   async showBubble(el) {
     var _a;
-    const mediaPath = (_a = this.current) == null ? void 0 : _a.mediaPath;
+    const mediaPath = (_a = this.panelOf(el)) == null ? void 0 : _a.mediaPath;
     const id = el.dataset.atId;
     if (!mediaPath || !id)
       return;

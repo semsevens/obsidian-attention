@@ -181,6 +181,10 @@ media-transcript 侧只加了两样东西（约 30 行）：每段字幕带上
 `data-mt-seg` / `data-mt-start`，以及每次重建字幕 DOM 后派发一个冒泡的
 `mt:transcript-rendered`（detail 里带 `mediaPath` / `trackPath`）。
 
+同时在 `.mt-transcript` 上写 `data-mt-media` / `data-mt-track`。**两者都要**：
+事件只能被当时在听的人收到，而属性随时可读 —— Attention 在字幕已经打开之后才被
+启用时收不到事件，全靠属性。所以 `panelOf()` 一律从 DOM 读，不缓存事件里的状态。
+
 **它不知道 Attention 存在**。Attention 监听这个事件后幂等重贴自己的高亮 ——
 所以不用去理解「对方哪个操作会让我的装饰失效」（搜索高亮重写 `.mt-txt` 就是一例，
 那里也补了一次广播）。没装 media-transcript 时事件永远不来，这个宿主自然休眠。
@@ -201,6 +205,17 @@ media-transcript 侧只加了两样东西（约 30 行）：每段字幕带上
 
 实测（`_test/attention/`）：在 12 段的 `whisper.json` 上标注，切到 24 段、
 措辞不同的 `讲座.srt`（`先验权重` vs `鲜艳权重`），高亮正确落在对应那一行。
+
+### 与 media-transcript 的交互分工
+
+| 动作 | 归谁 |
+|------|------|
+| 点**时间戳** | media-transcript：seek + play |
+| 点/拖**文字** | 选中 → Attention 弹浮层 |
+| 右键**有选区或高亮上** | Attention（capture 阶段 `stopPropagation`，避免两个菜单叠一起）|
+| 右键**其它位置** | media-transcript 原有菜单 |
+
+原来点整行就 seek，和划词抢同一个点击。按**目标元素**分工比按「有没有选区」猜可靠。
 
 ### 采集限制
 
