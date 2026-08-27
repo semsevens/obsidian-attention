@@ -1,4 +1,4 @@
-import { Plugin, TFile, TAbstractFile, WorkspaceLeaf, Notice } from 'obsidian';
+import { Plugin, TFile, TAbstractFile, WorkspaceLeaf, Notice, MarkdownView } from 'obsidian';
 import { AttentionSettings, DEFAULT_SETTINGS, AttentionSettingTab } from './settings';
 import { AttentionIndex } from './store/attentionIndex';
 import { IndexEntry } from './store/review';
@@ -9,16 +9,39 @@ import {
   sidecarPathFor,
   isSidecarPath,
 } from './store/sidecar';
+import { AnnotationStore } from './store/annotationStore';
+import { MarkdownHost } from './hosts/markdown/MarkdownHost';
+import { annotationDecorations, repaintEditors } from './hosts/markdown/decorations';
+import { readingModeHighlighter } from './hosts/markdown/readingMode';
 
 export default class AttentionPlugin extends Plugin {
   settings!: AttentionSettings;
   index!: AttentionIndex;
+  store!: AnnotationStore;
+  private markdownHost: MarkdownHost | null = null;
 
   async onload() {
     await this.loadSettings();
     this.index = new AttentionIndex(this.app);
+    this.store = new AnnotationStore(this.app, this.index);
 
     this.registerView(VIEW_TYPE_REVIEW, leaf => new ReviewView(leaf, this));
+
+    if (this.settings.enableMarkdownHost) this.setupMarkdownHost();
+
+    // A change to any annotation has to reach both rendering paths and the
+    // review panel; nothing repaints itself.
+    this.register(this.store.onChange(() => {
+      repaintEditors(this.app);
+      this.rerenderReadingViews();
+      this.refreshReviewViews();
+    }));
+
+    // Painting reads from the cache synchronously, so a file's annotations must
+    // be loaded before its view asks for them.
+    this.registerEvent(this.app.workspace.on('file-open', file => {
+      if (file) void this.store.warm(file.path);
+    }));
 
     // Scanning every sidecar touches the whole file list, so wait until the
     // vault has finished indexing rather than fighting it during startup.
@@ -41,6 +64,29 @@ export default class AttentionPlugin extends Plugin {
     }));
 
     this.addSettingTab(new AttentionSettingTab(this.app, this));
+  }
+
+  private setupMarkdownHost(): void {
+    // Both renderers read straight from the cache — resolving an anchor is a
+    // string search, cheap enough to redo on every repaint, and keeping no
+    // second copy means there is no stale state to invalidate.
+    const provider = (path: string) => this.store.peek(path);
+
+    this.registerEditorExtension(annotationDecorations(provider));
+    this.registerMarkdownPostProcessor(readingModeHighlighter(provider));
+
+    this.markdownHost = new MarkdownHost(this.app, this, this.store, this.settings);
+    this.markdownHost.register();
+  }
+
+  /** Reading mode caches its HTML, so post-processors only re-run on request. */
+  private rerenderReadingViews(): void {
+    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+      const view = leaf.view;
+      if (view instanceof MarkdownView && view.getMode() === 'preview') {
+        view.previewMode.rerender(true);
+      }
+    }
   }
 
   async rebuildIndex(): Promise<void> {
@@ -94,6 +140,7 @@ export default class AttentionPlugin extends Plugin {
       // Re-stamp `target` inside the file so it doesn't disagree with its name.
       const data = await loadSidecar(this.app, file.path);
       await saveSidecar(this.app, data);
+      this.store.forget(oldPath);
       this.index.renameFile(oldPath, file.path);
       this.refreshReviewViews();
     } catch (e) {
@@ -108,8 +155,13 @@ export default class AttentionPlugin extends Plugin {
 
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
     if (sidecar instanceof TFile) await this.app.fileManager.trashFile(sidecar);
+    this.store.forget(file.path);
     this.index.replaceFile(file.path, []);
     this.refreshReviewViews();
+  }
+
+  onunload() {
+    this.markdownHost?.detach();
   }
 
   async loadSettings() {

@@ -92,3 +92,65 @@
 .at-hl-comment {
   border-bottom: 2px solid var(--at-color, #f5c542);
 }
+
+/* ── Selection popover ─────────────────────────────────────────────────────── */
+
+.at-popover {
+  position: fixed;
+  z-index: var(--layer-popover);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 7px;
+  border-radius: 8px;
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  box-shadow: var(--shadow-s);
+}
+
+.at-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--background-modifier-border);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.at-swatch:hover {
+  transform: scale(1.15);
+}
+
+.at-pop-btn {
+  padding: 0 6px;
+  height: 22px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: none;
+  background: transparent;
+}
+
+.at-pop-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* ── Comment modal ─────────────────────────────────────────────────────────── */
+
+.at-comment-quote {
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  border-left: 3px solid var(--text-accent);
+  padding-left: 10px;
+  margin-bottom: 12px;
+  max-height: 6em;
+  overflow-y: auto;
+}
+
+.at-comment-input {
+  width: 100%;
+  min-height: 7em;
+  resize: vertical;
+  font-family: inherit;
+}

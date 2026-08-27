@@ -41,7 +41,7 @@ export class ReviewView extends ItemView {
 
     if (total === 0) {
       root.createDiv('at-empty').setText(
-        'Nothing marked yet. Select text in a note or a transcript to highlight it.',
+        'Nothing marked yet. Select text in a note to highlight it or leave a comment.',
       );
       return;
     }

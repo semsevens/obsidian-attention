@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => AttentionPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian4 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian = require("obsidian");
@@ -116,6 +116,9 @@ var import_obsidian2 = require("obsidian");
 // src/model.ts
 function emptyFile(target) {
   return { version: 1, target, annotations: [] };
+}
+function newId() {
+  return Math.random().toString(36).slice(2, 10);
 }
 function isComment(a) {
   return a.body !== null && a.body.trim().length > 0;
@@ -268,7 +271,7 @@ var ReviewView = class extends import_obsidian3.ItemView {
     resurface.addEventListener("click", () => this.renderResurfaced());
     if (total === 0) {
       root.createDiv("at-empty").setText(
-        "Nothing marked yet. Select text in a note or a transcript to highlight it."
+        "Nothing marked yet. Select text in a note to highlight it or leave a comment."
       );
       return;
     }
@@ -326,12 +329,506 @@ function fmtTime(seconds) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+// src/store/annotationStore.ts
+var AnnotationStore = class {
+  constructor(app, index) {
+    this.app = app;
+    this.index = index;
+    this.cache = /* @__PURE__ */ new Map();
+    this.listeners = [];
+  }
+  /** Annotations for a file, from cache when we have it. */
+  async get(targetPath) {
+    const cached = this.cache.get(targetPath);
+    if (cached)
+      return cached;
+    const loaded = await loadSidecar(this.app, targetPath);
+    this.cache.set(targetPath, loaded);
+    return loaded;
+  }
+  /** Synchronous peek for render paths that can't await. Empty if not loaded. */
+  peek(targetPath) {
+    var _a, _b;
+    return (_b = (_a = this.cache.get(targetPath)) == null ? void 0 : _a.annotations) != null ? _b : [];
+  }
+  /** Load into the cache so a later peek() has something to paint. */
+  async warm(targetPath) {
+    await this.get(targetPath);
+    this.emit(targetPath);
+  }
+  async add(targetPath, annotation) {
+    const data = await this.get(targetPath);
+    data.annotations.push(annotation);
+    await this.commit(targetPath, data);
+  }
+  async update(targetPath, id, patch) {
+    const data = await this.get(targetPath);
+    const target = data.annotations.find((a) => a.id === id);
+    if (!target)
+      return;
+    Object.assign(target, patch, { updated: new Date().toISOString() });
+    await this.commit(targetPath, data);
+  }
+  async remove(targetPath, id) {
+    const data = await this.get(targetPath);
+    const before = data.annotations.length;
+    data.annotations = data.annotations.filter((a) => a.id !== id);
+    if (data.annotations.length === before)
+      return;
+    await this.commit(targetPath, data);
+  }
+  /** Drop a cache entry (after an external edit or a rename). */
+  forget(targetPath) {
+    this.cache.delete(targetPath);
+  }
+  async commit(targetPath, data) {
+    await saveSidecar(this.app, data);
+    this.cache.set(targetPath, data);
+    this.index.replaceFile(targetPath, data.annotations);
+    this.emit(targetPath);
+  }
+  onChange(listener) {
+    this.listeners.push(listener);
+    return () => {
+      this.listeners = this.listeners.filter((l) => l !== listener);
+    };
+  }
+  emit(targetPath) {
+    for (const l of this.listeners)
+      l(targetPath);
+  }
+};
+
+// src/hosts/markdown/MarkdownHost.ts
+var import_obsidian5 = require("obsidian");
+
+// src/anchor/textQuote.ts
+var CONTEXT_LEN = 32;
+function describe(text, from, to) {
+  return {
+    quote: text.slice(from, to),
+    prefix: text.slice(Math.max(0, from - CONTEXT_LEN), from),
+    suffix: text.slice(to, to + CONTEXT_LEN),
+    from,
+    to
+  };
+}
+function commonSuffixLen(a, b) {
+  let n = 0;
+  while (n < a.length && n < b.length && a[a.length - 1 - n] === b[b.length - 1 - n])
+    n++;
+  return n;
+}
+function commonPrefixLen(a, b) {
+  let n = 0;
+  while (n < a.length && n < b.length && a[n] === b[n])
+    n++;
+  return n;
+}
+function allOccurrences(text, needle) {
+  if (needle.length === 0)
+    return [];
+  const out = [];
+  let at = text.indexOf(needle);
+  while (at >= 0) {
+    out.push(at);
+    at = text.indexOf(needle, at + 1);
+  }
+  return out;
+}
+function resolve(text, anchor) {
+  const { quote } = anchor;
+  if (quote.length === 0)
+    return null;
+  if (text.slice(anchor.from, anchor.to) === quote) {
+    return { from: anchor.from, to: anchor.to, how: "exact" };
+  }
+  const hits = allOccurrences(text, quote);
+  if (hits.length === 0)
+    return null;
+  if (hits.length === 1) {
+    return { from: hits[0], to: hits[0] + quote.length, how: "unique" };
+  }
+  let best = -1;
+  let bestScore = -1;
+  for (const at of hits) {
+    const score = commonSuffixLen(text.slice(0, at), anchor.prefix) + commonPrefixLen(text.slice(at + quote.length), anchor.suffix);
+    if (score > bestScore) {
+      bestScore = score;
+      best = at;
+    }
+  }
+  if (bestScore > 0) {
+    return { from: best, to: best + quote.length, how: "context" };
+  }
+  let nearest = hits[0];
+  for (const at of hits) {
+    if (Math.abs(at - anchor.from) < Math.abs(nearest - anchor.from))
+      nearest = at;
+  }
+  return { from: nearest, to: nearest + quote.length, how: "nearest" };
+}
+function nthOccurrence(text, needle, n) {
+  if (needle.length === 0 || n < 0)
+    return -1;
+  let at = text.indexOf(needle);
+  for (let i = 0; i < n && at >= 0; i++)
+    at = text.indexOf(needle, at + 1);
+  return at;
+}
+function countOccurrences(before, needle) {
+  if (needle.length === 0)
+    return 0;
+  let n = 0;
+  let at = before.indexOf(needle);
+  while (at >= 0) {
+    n++;
+    at = before.indexOf(needle, at + 1);
+  }
+  return n;
+}
+
+// src/ui/SelectionPopover.ts
+var SelectionPopover = class {
+  constructor(colors) {
+    this.colors = colors;
+    this.el = null;
+    this.dismiss = () => this.hide();
+  }
+  showAt(rect, actions) {
+    this.hide();
+    const el = document.createElement("div");
+    el.className = "at-popover";
+    for (const color of this.colors) {
+      const swatch = el.createEl("button", { cls: "at-swatch" });
+      swatch.style.background = color;
+      swatch.setAttribute("aria-label", `Highlight ${color}`);
+      swatch.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        actions.onHighlight(color);
+        this.hide();
+      });
+    }
+    const comment = el.createEl("button", { cls: "at-pop-btn", text: "\u{1F4AC}" });
+    comment.setAttribute("aria-label", "Add a comment");
+    comment.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      actions.onComment();
+      this.hide();
+    });
+    if (actions.onRemove) {
+      const remove = el.createEl("button", { cls: "at-pop-btn", text: "\u2715" });
+      remove.setAttribute("aria-label", "Remove highlight");
+      remove.addEventListener("mousedown", (e) => {
+        var _a;
+        e.preventDefault();
+        (_a = actions.onRemove) == null ? void 0 : _a.call(actions);
+        this.hide();
+      });
+    }
+    document.body.appendChild(el);
+    this.el = el;
+    const { width, height } = el.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(8, rect.left + rect.width / 2 - width / 2),
+      window.innerWidth - width - 8
+    );
+    const above = rect.top - height - 8;
+    el.style.left = `${left}px`;
+    el.style.top = `${above < 8 ? rect.bottom + 8 : above}px`;
+    window.setTimeout(() => {
+      document.addEventListener("mousedown", this.dismiss);
+      document.addEventListener("keydown", this.dismiss);
+    }, 0);
+  }
+  hide() {
+    var _a;
+    document.removeEventListener("mousedown", this.dismiss);
+    document.removeEventListener("keydown", this.dismiss);
+    (_a = this.el) == null ? void 0 : _a.remove();
+    this.el = null;
+  }
+};
+
+// src/ui/CommentModal.ts
+var import_obsidian4 = require("obsidian");
+var CommentModal = class extends import_obsidian4.Modal {
+  constructor(app, quote, initial, onSubmit) {
+    super(app);
+    this.quote = quote;
+    this.onSubmit = onSubmit;
+    this.value = initial;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.addClass("at-comment-modal");
+    contentEl.createDiv("at-comment-quote").setText(this.quote);
+    const input = contentEl.createEl("textarea", { cls: "at-comment-input" });
+    input.value = this.value;
+    input.placeholder = "What caught your attention?";
+    input.addEventListener("input", () => {
+      this.value = input.value;
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        this.submit();
+      }
+    });
+    new import_obsidian4.Setting(contentEl).addButton(
+      (b) => b.setButtonText("Save").setCta().onClick(() => this.submit())
+    );
+    window.setTimeout(() => input.focus(), 0);
+  }
+  submit() {
+    this.onSubmit(this.value.trim());
+    this.close();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+};
+
+// src/hosts/markdown/MarkdownHost.ts
+var MarkdownHost = class {
+  constructor(app, plugin, store, settings) {
+    this.app = app;
+    this.plugin = plugin;
+    this.store = store;
+    this.settings = settings;
+    this.popover = new SelectionPopover(settings.colors);
+  }
+  register() {
+    this.plugin.registerDomEvent(document, "mouseup", (e) => {
+      window.setTimeout(() => {
+        void this.handleMouseUp(e);
+      }, 0);
+    });
+  }
+  detach() {
+    this.popover.hide();
+  }
+  async handleMouseUp(e) {
+    var _a, _b, _c;
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    if (!(view == null ? void 0 : view.file))
+      return;
+    const hit = (_b = (_a = e.target) == null ? void 0 : _a.closest) == null ? void 0 : _b.call(_a, ".at-hl");
+    const selection = window.getSelection();
+    const selected = (_c = selection == null ? void 0 : selection.toString()) != null ? _c : "";
+    if (hit instanceof HTMLElement && selected.length === 0) {
+      await this.openExisting(view.file, hit);
+      return;
+    }
+    if (selected.trim().length === 0)
+      return;
+    if (!selection || !view.contentEl.contains(selection.anchorNode))
+      return;
+    const anchor = await this.capture(view, selection, selected);
+    if (!anchor)
+      return;
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    const file = view.file;
+    this.popover.showAt(rect, {
+      onHighlight: (color) => {
+        void this.create(file, anchor, color, null);
+      },
+      onComment: () => {
+        new CommentModal(this.app, anchor.quote, "", (body) => {
+          void this.create(file, anchor, this.settings.defaultColor, body || null);
+        }).open();
+      }
+    });
+  }
+  /** Build a source-anchored range from whatever the user selected. */
+  async capture(view, selection, selected) {
+    if (view.getMode() === "source") {
+      const editor = view.editor;
+      const from = editor.posToOffset(editor.getCursor("from"));
+      const to = editor.posToOffset(editor.getCursor("to"));
+      if (from === to)
+        return null;
+      return { kind: "markdown", ...describe(editor.getValue(), from, to) };
+    }
+    const file = view.file;
+    if (!file)
+      return null;
+    const source = await this.app.vault.cachedRead(file);
+    const ordinal = this.renderedOrdinal(view, selection, selected);
+    const at = nthOccurrence(source, selected, ordinal);
+    if (at < 0) {
+      new import_obsidian5.Notice("Attention: cannot anchor a selection that crosses formatting.");
+      return null;
+    }
+    return { kind: "markdown", ...describe(source, at, at + selected.length) };
+  }
+  /** How many identical strings precede this selection on screen. */
+  renderedOrdinal(view, selection, selected) {
+    const range = selection.getRangeAt(0).cloneRange();
+    range.selectNodeContents(view.contentEl);
+    range.setEnd(selection.getRangeAt(0).startContainer, selection.getRangeAt(0).startOffset);
+    return countOccurrences(range.toString(), selected);
+  }
+  async create(file, anchor, color, body) {
+    const annotation = {
+      id: newId(),
+      anchor,
+      color,
+      body,
+      created: new Date().toISOString(),
+      reviewed: []
+    };
+    await this.store.add(file.path, annotation);
+  }
+  async openExisting(file, el) {
+    const id = el.dataset.atId;
+    if (!id)
+      return;
+    const data = await this.store.get(file.path);
+    const annotation = data.annotations.find((a) => a.id === id);
+    if (!annotation)
+      return;
+    const rect = el.getBoundingClientRect();
+    this.popover.showAt(rect, {
+      onHighlight: (color) => {
+        void this.store.update(file.path, id, { color });
+      },
+      onComment: () => {
+        var _a;
+        new CommentModal(this.app, annotation.anchor.quote, (_a = annotation.body) != null ? _a : "", (body) => {
+          void this.store.update(file.path, id, { body: body || null });
+        }).open();
+      },
+      onRemove: () => {
+        void this.store.remove(file.path, id);
+      }
+    });
+  }
+};
+
+// src/hosts/markdown/decorations.ts
+var import_view = require("@codemirror/view");
+var import_state = require("@codemirror/state");
+var import_obsidian6 = require("obsidian");
+var refreshAnnotations = import_state.StateEffect.define();
+function build(view, provider) {
+  var _a, _b;
+  const path = (_b = (_a = view.state.field(import_obsidian6.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+  if (!path)
+    return import_view.Decoration.none;
+  const annotations = provider(path);
+  if (annotations.length === 0)
+    return import_view.Decoration.none;
+  const doc = view.state.doc.toString();
+  const ranges = [];
+  for (const a of annotations) {
+    if (a.anchor.kind !== "markdown")
+      continue;
+    const at = resolve(doc, a.anchor);
+    if (!at || at.from === at.to)
+      continue;
+    ranges.push(
+      import_view.Decoration.mark({
+        class: isComment(a) ? "at-hl at-hl-comment" : "at-hl",
+        attributes: { style: `--at-color: ${a.color}`, "data-at-id": a.id }
+      }).range(at.from, at.to)
+    );
+  }
+  return import_view.Decoration.set(ranges, true);
+}
+function annotationDecorations(provider) {
+  return import_view.ViewPlugin.fromClass(
+    class {
+      constructor(view) {
+        this.decorations = build(view, provider);
+      }
+      update(u) {
+        const refreshed = u.transactions.some(
+          (t) => t.effects.some((e) => e.is(refreshAnnotations))
+        );
+        if (u.docChanged || u.viewportChanged || refreshed) {
+          this.decorations = build(u.view, provider);
+        }
+      }
+    },
+    { decorations: (v) => v.decorations }
+  );
+}
+function repaintEditors(app) {
+  app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
+    const view = leaf.view;
+    if (!(view instanceof import_obsidian6.MarkdownView))
+      return;
+    const cm = view.editor.cm;
+    cm == null ? void 0 : cm.dispatch({ effects: refreshAnnotations.of() });
+  });
+}
+
+// src/hosts/markdown/readingMode.ts
+function readingModeHighlighter(provider) {
+  return (el, ctx) => {
+    const annotations = provider(ctx.sourcePath);
+    if (annotations.length === 0)
+      return;
+    for (const a of annotations) {
+      if (a.anchor.kind !== "markdown")
+        continue;
+      paint(el, a);
+    }
+  };
+}
+function paint(root, a) {
+  const needle = a.anchor.quote;
+  if (!needle)
+    return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const targets = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const text = n;
+    if (text.data.includes(needle) && !isInsideHighlight(text))
+      targets.push(text);
+  }
+  for (const node of targets) {
+    const at = node.data.indexOf(needle);
+    if (at < 0)
+      continue;
+    const tail = node.splitText(at);
+    tail.splitText(needle.length);
+    const span = document.createElement("span");
+    span.className = isComment(a) ? "at-hl at-hl-comment" : "at-hl";
+    span.style.setProperty("--at-color", a.color);
+    span.dataset.atId = a.id;
+    tail.replaceWith(span);
+    span.appendChild(tail);
+  }
+}
+function isInsideHighlight(node) {
+  var _a;
+  return ((_a = node.parentElement) == null ? void 0 : _a.closest(".at-hl")) != null;
+}
+
 // src/main.ts
-var AttentionPlugin = class extends import_obsidian4.Plugin {
+var AttentionPlugin = class extends import_obsidian7.Plugin {
+  constructor() {
+    super(...arguments);
+    this.markdownHost = null;
+  }
   async onload() {
     await this.loadSettings();
     this.index = new AttentionIndex(this.app);
+    this.store = new AnnotationStore(this.app, this.index);
     this.registerView(VIEW_TYPE_REVIEW, (leaf) => new ReviewView(leaf, this));
+    if (this.settings.enableMarkdownHost)
+      this.setupMarkdownHost();
+    this.register(this.store.onChange(() => {
+      repaintEditors(this.app);
+      this.rerenderReadingViews();
+      this.refreshReviewViews();
+    }));
+    this.registerEvent(this.app.workspace.on("file-open", (file) => {
+      if (file)
+        void this.store.warm(file.path);
+    }));
     this.app.workspace.onLayoutReady(() => {
       void this.rebuildIndex();
     });
@@ -352,6 +849,22 @@ var AttentionPlugin = class extends import_obsidian4.Plugin {
       void this.handleDelete(file);
     }));
     this.addSettingTab(new AttentionSettingTab(this.app, this));
+  }
+  setupMarkdownHost() {
+    const provider = (path) => this.store.peek(path);
+    this.registerEditorExtension(annotationDecorations(provider));
+    this.registerMarkdownPostProcessor(readingModeHighlighter(provider));
+    this.markdownHost = new MarkdownHost(this.app, this, this.store, this.settings);
+    this.markdownHost.register();
+  }
+  /** Reading mode caches its HTML, so post-processors only re-run on request. */
+  rerenderReadingViews() {
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof import_obsidian7.MarkdownView && view.getMode() === "preview") {
+        view.previewMode.rerender(true);
+      }
+    }
   }
   async rebuildIndex() {
     await this.index.rebuild();
@@ -390,10 +903,10 @@ var AttentionPlugin = class extends import_obsidian4.Plugin {
    * is a sibling, so it travels with the folder — only a file's own rename does.
    */
   async handleRename(file, oldPath) {
-    if (!(file instanceof import_obsidian4.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian7.TFile) || isSidecarPath(file.path))
       return;
     const old = this.app.vault.getAbstractFileByPath(sidecarPathFor(oldPath));
-    if (!(old instanceof import_obsidian4.TFile))
+    if (!(old instanceof import_obsidian7.TFile))
       return;
     const nextPath = sidecarPathFor(file.path);
     if (old.path === nextPath)
@@ -402,23 +915,29 @@ var AttentionPlugin = class extends import_obsidian4.Plugin {
       await this.app.fileManager.renameFile(old, nextPath);
       const data = await loadSidecar(this.app, file.path);
       await saveSidecar(this.app, data);
+      this.store.forget(oldPath);
       this.index.renameFile(oldPath, file.path);
       this.refreshReviewViews();
     } catch (e) {
-      new import_obsidian4.Notice(`Attention: could not move annotations for ${file.name}`);
+      new import_obsidian7.Notice(`Attention: could not move annotations for ${file.name}`);
       console.error(e);
     }
   }
   async handleDelete(file) {
-    if (!(file instanceof import_obsidian4.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian7.TFile) || isSidecarPath(file.path))
       return;
     if (this.settings.keepOrphanedSidecars)
       return;
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
-    if (sidecar instanceof import_obsidian4.TFile)
+    if (sidecar instanceof import_obsidian7.TFile)
       await this.app.fileManager.trashFile(sidecar);
+    this.store.forget(file.path);
     this.index.replaceFile(file.path, []);
     this.refreshReviewViews();
+  }
+  onunload() {
+    var _a;
+    (_a = this.markdownHost) == null ? void 0 : _a.detach();
   }
   async loadSettings() {
     const saved = await this.loadData();

@@ -2,12 +2,11 @@
 // you said about it). A highlight is just an annotation whose body is null —
 // they are not two different things, so they live in one file and one type.
 
-/** ~32 chars of context on each side, used to re-find a quote after edits. */
-export interface QuoteContext {
-  quote: string;
-  prefix: string;
-  suffix: string;
-}
+import type { TextAnchor } from './anchor/textQuote';
+
+// Both hosts anchor the same way — a quote plus context — so they share the
+// shape defined next to the resolver that consumes it.
+export type QuoteContext = Pick<TextAnchor, 'quote' | 'prefix' | 'suffix'>;
 
 /**
  * A spot inside a transcript. Anchored to the *media* file, not to a subtitle
@@ -30,11 +29,7 @@ export interface TranscriptAnchor extends QuoteContext {
  * A spot inside a markdown file. Offsets are a *hint* — the file is editable,
  * so on conflict the quote wins and the offsets get rewritten.
  */
-export interface MarkdownAnchor extends QuoteContext {
-  kind: 'markdown';
-  from: number;
-  to: number;
-}
+export type MarkdownAnchor = TextAnchor & { kind: 'markdown' };
 
 export type Anchor = TranscriptAnchor | MarkdownAnchor;
 
