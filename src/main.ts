@@ -42,7 +42,7 @@ export default class AttentionPlugin extends Plugin {
     // Painting reads from the cache synchronously, so a file's annotations must
     // be loaded before its view asks for them.
     this.registerEvent(this.app.workspace.on('file-open', file => {
-      if (file) void this.store.warm(file.path);
+      if (file) void this.onFileOpen(file);
     }));
 
     // Scanning every sidecar touches the whole file list, so wait until the
@@ -71,6 +71,13 @@ export default class AttentionPlugin extends Plugin {
   /** Mark style is a body class, so switching it needs no repaint. */
   applyMarkStyle(): void {
     document.body.toggleClass('at-style-background', this.settings.markStyle === 'background');
+  }
+
+  private async onFileOpen(file: TFile): Promise<void> {
+    await this.store.warm(file.path);
+    if (!this.settings.autoRevealPanel) return;
+    if (this.store.peek(file.path).length === 0) return;
+    await this.openReview({ focus: false });
   }
 
   private setupMarkdownHost(): void {
@@ -111,21 +118,30 @@ export default class AttentionPlugin extends Plugin {
     this.index.replaceFile(entry.targetPath, data.annotations);
   }
 
-  private async openReview(): Promise<void> {
+  /**
+   * Show the panel. `focus: false` is used when opening it on the user's behalf
+   * — revealing a sidebar is helpful, stealing the cursor mid-sentence is not.
+   */
+  private async openReview({ focus = true }: { focus?: boolean } = {}): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW);
-    if (existing.length > 0) {
-      await this.app.workspace.revealLeaf(existing[0]);
-      return;
-    }
-    const leaf: WorkspaceLeaf | null = this.app.workspace.getRightLeaf(false);
+    const leaf: WorkspaceLeaf | null =
+      existing[0] ?? this.app.workspace.getRightLeaf(false);
     if (!leaf) return;
-    await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: true });
+
+    if (existing.length === 0) {
+      await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: focus });
+    }
     await this.app.workspace.revealLeaf(leaf);
+
+    if (!focus) {
+      const editor = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (editor) this.app.workspace.setActiveLeaf(editor.leaf, { focus: true });
+    }
   }
 
   private refreshReviewViews(): void {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW)) {
-      if (leaf.view instanceof ReviewView) leaf.view.render();
+      if (leaf.view instanceof ReviewView) void leaf.view.render();
     }
   }
 

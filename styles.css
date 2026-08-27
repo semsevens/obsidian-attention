@@ -16,6 +16,27 @@
   z-index: 1;
 }
 
+.at-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.at-tab {
+  font-size: var(--font-ui-smaller);
+  padding: 2px 9px;
+  cursor: pointer;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+}
+
+.at-tab.is-active,
+.at-btn.is-active {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+  font-weight: var(--font-medium);
+}
+
 .at-review-total {
   font-size: var(--font-ui-small);
   color: var(--text-muted);

@@ -26,7 +26,17 @@ Click a highlight to read its comment; right-click it to edit, recolour or
 remove. In editing modes these are appended to Obsidian's own context menu;
 reading mode gets its own, raised only when there is something to offer.
 
-The ribbon's highlighter icon opens the review panel.
+The ribbon's highlighter icon opens the panel, which has two views of the same
+annotations:
+
+- **This note** — an outline, in document order, for finding your way around
+  what you marked here
+- **All** — across the vault, grouped by how long ago, with a **Resurface**
+  button that brings back a handful you haven't revisited
+
+Clicking an entry jumps to the passage and flashes it. The panel appears on its
+own when you open a note that has annotations, and stays out of the way when you
+open one that doesn't.
 
 ## Versus `==highlight==`
 

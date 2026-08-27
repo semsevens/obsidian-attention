@@ -32,6 +32,9 @@ export interface AttentionSettings {
    */
   trackReplays: boolean;
 
+  /** Reveal the panel when opening a note that has annotations. */
+  autoRevealPanel: boolean;
+
   /** How many annotations the review view resurfaces at a time. */
   resurfaceCount: number;
 
@@ -47,6 +50,7 @@ export const DEFAULT_SETTINGS: AttentionSettings = {
   enableMarkdownHost: true,
   enableTranscriptHost: true,
   trackReplays: false,
+  autoRevealPanel: true,
   resurfaceCount: 10,
   keepOrphanedSidecars: true,
 };
@@ -118,6 +122,19 @@ export class AttentionSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl).setName('Review').setHeading();
+
+    new Setting(containerEl)
+      .setName('Open the panel for annotated notes')
+      .setDesc(
+        'Reveal the Attention panel when you open a note that has annotations, and leave it ' +
+          'alone otherwise. Focus stays in the note either way.',
+      )
+      .addToggle(t =>
+        t.setValue(this.plugin.settings.autoRevealPanel).onChange(async v => {
+          this.plugin.settings.autoRevealPanel = v;
+          await this.plugin.saveSettings();
+        }),
+      );
 
     new Setting(containerEl)
       .setName('Resurface count')

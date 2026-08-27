@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => AttentionPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian = require("obsidian");
@@ -39,6 +39,7 @@ var DEFAULT_SETTINGS = {
   enableMarkdownHost: true,
   enableTranscriptHost: true,
   trackReplays: false,
+  autoRevealPanel: true,
   resurfaceCount: 10,
   keepOrphanedSidecars: true
 };
@@ -83,6 +84,14 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
       })
     );
     new import_obsidian.Setting(containerEl).setName("Review").setHeading();
+    new import_obsidian.Setting(containerEl).setName("Open the panel for annotated notes").setDesc(
+      "Reveal the Attention panel when you open a note that has annotations, and leave it alone otherwise. Focus stays in the note either way."
+    ).addToggle(
+      (t) => t.setValue(this.plugin.settings.autoRevealPanel).onChange(async (v) => {
+        this.plugin.settings.autoRevealPanel = v;
+        await this.plugin.saveSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Resurface count").setDesc("How many annotations to bring back at a time, preferring ones you have not revisited.").addSlider(
       (s) => s.setLimits(3, 50, 1).setValue(this.plugin.settings.resurfaceCount).onChange(async (v) => {
         this.plugin.settings.resurfaceCount = v;
@@ -253,173 +262,7 @@ var AttentionIndex = class {
 };
 
 // src/views/ReviewView.ts
-var import_obsidian3 = require("obsidian");
-var VIEW_TYPE_REVIEW = "attention-review";
-var BUCKET_LABELS = {
-  today: "Today",
-  week: "This week",
-  month: "This month",
-  older: "Earlier"
-};
-var ReviewView = class extends import_obsidian3.ItemView {
-  constructor(leaf, plugin) {
-    super(leaf);
-    this.plugin = plugin;
-  }
-  getViewType() {
-    return VIEW_TYPE_REVIEW;
-  }
-  getDisplayText() {
-    return "Attention";
-  }
-  getIcon() {
-    return "highlighter";
-  }
-  async onOpen() {
-    this.render();
-  }
-  render() {
-    const root = this.contentEl;
-    root.empty();
-    root.addClass("at-review");
-    const buckets = this.plugin.index.buckets();
-    const total = this.plugin.index.all().length;
-    const header = root.createDiv("at-review-header");
-    header.createSpan({ text: `${total} marked`, cls: "at-review-total" });
-    const resurface = header.createEl("button", { text: "Resurface", cls: "at-btn" });
-    resurface.addEventListener("click", () => this.renderResurfaced());
-    if (total === 0) {
-      root.createDiv("at-empty").setText(
-        "Nothing marked yet. Select text in a note to highlight it or leave a comment."
-      );
-      return;
-    }
-    for (const key of BUCKET_ORDER) {
-      const entries = buckets[key];
-      if (entries.length === 0)
-        continue;
-      root.createDiv("at-bucket-title").setText(`${BUCKET_LABELS[key]} \xB7 ${entries.length}`);
-      for (const entry of entries)
-        this.renderEntry(root, entry);
-    }
-  }
-  renderResurfaced() {
-    const n = this.plugin.settings.resurfaceCount;
-    const picked = this.plugin.index.resurface(n, () => Math.random());
-    const root = this.contentEl;
-    root.empty();
-    root.addClass("at-review");
-    const header = root.createDiv("at-review-header");
-    header.createSpan({ text: `${picked.length} resurfaced`, cls: "at-review-total" });
-    const back = header.createEl("button", { text: "All", cls: "at-btn" });
-    back.addEventListener("click", () => this.render());
-    for (const entry of picked)
-      this.renderEntry(root, entry);
-  }
-  renderEntry(root, entry) {
-    var _a, _b;
-    const { annotation, targetPath } = entry;
-    const el = root.createDiv("at-entry");
-    el.setCssProps({ "--at-color": annotation.color });
-    el.createDiv("at-quote").setText(annotation.anchor.quote);
-    if (isComment(annotation)) {
-      el.createDiv("at-body").setText((_a = annotation.body) != null ? _a : "");
-    }
-    const meta = el.createDiv("at-meta");
-    meta.createSpan({ text: (_b = targetPath.split("/").pop()) != null ? _b : targetPath, cls: "at-source" });
-    if (annotation.anchor.kind === "transcript") {
-      meta.createSpan({ text: fmtTime(annotation.anchor.start), cls: "at-time" });
-    }
-    el.addEventListener("click", () => {
-      void this.open(entry);
-    });
-  }
-  async open(entry) {
-    const file = this.app.vault.getAbstractFileByPath(entry.targetPath);
-    if (!(file instanceof import_obsidian3.TFile))
-      return;
-    await this.app.workspace.getLeaf(false).openFile(file);
-    await this.plugin.markReviewed(entry);
-  }
-};
-function fmtTime(seconds) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-// src/store/annotationStore.ts
-var AnnotationStore = class {
-  constructor(app, index) {
-    this.app = app;
-    this.index = index;
-    this.cache = /* @__PURE__ */ new Map();
-    this.listeners = [];
-  }
-  /** Annotations for a file, from cache when we have it. */
-  async get(targetPath) {
-    const cached = this.cache.get(targetPath);
-    if (cached)
-      return cached;
-    const loaded = await loadSidecar(this.app, targetPath);
-    this.cache.set(targetPath, loaded);
-    return loaded;
-  }
-  /** Synchronous peek for render paths that can't await. Empty if not loaded. */
-  peek(targetPath) {
-    var _a, _b;
-    return (_b = (_a = this.cache.get(targetPath)) == null ? void 0 : _a.annotations) != null ? _b : [];
-  }
-  /** Load into the cache so a later peek() has something to paint. */
-  async warm(targetPath) {
-    await this.get(targetPath);
-    this.emit(targetPath);
-  }
-  async add(targetPath, annotation) {
-    const data = await this.get(targetPath);
-    data.annotations.push(annotation);
-    await this.commit(targetPath, data);
-  }
-  async update(targetPath, id, patch) {
-    const data = await this.get(targetPath);
-    const target = data.annotations.find((a) => a.id === id);
-    if (!target)
-      return;
-    Object.assign(target, patch, { updated: new Date().toISOString() });
-    await this.commit(targetPath, data);
-  }
-  async remove(targetPath, id) {
-    const data = await this.get(targetPath);
-    const before = data.annotations.length;
-    data.annotations = data.annotations.filter((a) => a.id !== id);
-    if (data.annotations.length === before)
-      return;
-    await this.commit(targetPath, data);
-  }
-  /** Drop a cache entry (after an external edit or a rename). */
-  forget(targetPath) {
-    this.cache.delete(targetPath);
-  }
-  async commit(targetPath, data) {
-    await saveSidecar(this.app, data);
-    this.cache.set(targetPath, data);
-    this.index.replaceFile(targetPath, data.annotations);
-    this.emit(targetPath);
-  }
-  onChange(listener) {
-    this.listeners.push(listener);
-    return () => {
-      this.listeners = this.listeners.filter((l) => l !== listener);
-    };
-  }
-  emit(targetPath) {
-    for (const l of this.listeners)
-      l(targetPath);
-  }
-};
-
-// src/hosts/markdown/MarkdownHost.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/anchor/textQuote.ts
 var CONTEXT_LEN = 32;
@@ -506,6 +349,286 @@ function countOccurrences(before, needle) {
   }
   return n;
 }
+
+// src/store/documentOrder.ts
+async function inDocumentOrder(app, file, annotations) {
+  if (annotations.length === 0)
+    return [];
+  let source;
+  try {
+    source = await app.vault.cachedRead(file);
+  } catch (e) {
+    return [...annotations];
+  }
+  const positioned = annotations.map((a) => {
+    var _a, _b;
+    return {
+      a,
+      at: a.anchor.kind === "markdown" ? (_b = (_a = resolve(source, a.anchor)) == null ? void 0 : _a.from) != null ? _b : null : null
+    };
+  });
+  return positioned.sort((x, y) => {
+    if (x.at === null && y.at === null)
+      return 0;
+    if (x.at === null)
+      return 1;
+    if (y.at === null)
+      return -1;
+    return x.at - y.at;
+  }).map((p) => p.a);
+}
+
+// src/hosts/markdown/reveal.ts
+var import_obsidian3 = require("obsidian");
+async function revealInMarkdown(app, file, annotation) {
+  const leaf = app.workspace.getLeaf(false);
+  await leaf.openFile(file);
+  const view = leaf.view;
+  if (!(view instanceof import_obsidian3.MarkdownView))
+    return;
+  if (view.getMode() === "source") {
+    if (annotation.anchor.kind !== "markdown")
+      return;
+    const editor = view.editor;
+    const at = resolve(editor.getValue(), annotation.anchor);
+    if (!at)
+      return;
+    const from = editor.offsetToPos(at.from);
+    const to = editor.offsetToPos(at.to);
+    editor.setSelection(from, to);
+    editor.scrollIntoView({ from, to }, true);
+    return;
+  }
+  await flashWhenPainted(view, annotation.id);
+}
+async function flashWhenPainted(view, id, tries = 20) {
+  for (let i = 0; i < tries; i++) {
+    const el = view.contentEl.querySelector(`.at-hl[data-at-id="${id}"]`);
+    if (el instanceof HTMLElement) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      flash(el);
+      return;
+    }
+    await new Promise((r) => window.setTimeout(r, 50));
+  }
+}
+function flash(el) {
+  el.addClass("at-flash");
+  window.setTimeout(() => el.removeClass("at-flash"), 1300);
+}
+
+// src/views/ReviewView.ts
+var VIEW_TYPE_REVIEW = "attention-review";
+var BUCKET_LABELS = {
+  today: "Today",
+  week: "This week",
+  month: "This month",
+  older: "Earlier"
+};
+var ReviewView = class extends import_obsidian4.ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.lens = "file";
+    this.resurfaced = null;
+  }
+  getViewType() {
+    return VIEW_TYPE_REVIEW;
+  }
+  getDisplayText() {
+    return "Attention";
+  }
+  getIcon() {
+    return "highlighter";
+  }
+  async onOpen() {
+    this.registerEvent(this.app.workspace.on("file-open", () => {
+      void this.render();
+    }));
+    await this.render();
+  }
+  /** Re-render. Safe to call from anywhere; it reads current state itself. */
+  async render() {
+    const root = this.contentEl;
+    root.empty();
+    root.addClass("at-review");
+    this.renderHeader(root);
+    if (this.resurfaced) {
+      for (const e of this.resurfaced)
+        this.renderEntry(root, e.annotation, e.targetPath);
+      return;
+    }
+    if (this.lens === "file")
+      await this.renderFile(root);
+    else
+      this.renderAll(root);
+  }
+  renderHeader(root) {
+    const header = root.createDiv("at-review-header");
+    const tabs = header.createDiv("at-tabs");
+    const tab = (label, lens) => {
+      const el = tabs.createEl("button", { text: label, cls: "at-tab" });
+      if (this.lens === lens && !this.resurfaced)
+        el.addClass("is-active");
+      el.addEventListener("click", () => {
+        this.lens = lens;
+        this.resurfaced = null;
+        void this.render();
+      });
+    };
+    tab("This note", "file");
+    tab("All", "all");
+    const resurface = header.createEl("button", { text: "Resurface", cls: "at-btn" });
+    if (this.resurfaced)
+      resurface.addClass("is-active");
+    resurface.addEventListener("click", () => {
+      this.resurfaced = this.resurfaced ? null : this.plugin.index.resurface(this.plugin.settings.resurfaceCount, () => Math.random());
+      void this.render();
+    });
+  }
+  // ── This note ──────────────────────────────────────────────────────────────
+  async renderFile(root) {
+    const file = this.app.workspace.getActiveFile();
+    if (!file) {
+      this.empty(root, "No note open.");
+      return;
+    }
+    const data = await this.plugin.store.get(file.path);
+    if (data.annotations.length === 0) {
+      this.empty(root, `Nothing marked in \u201C${file.basename}\u201D.`);
+      return;
+    }
+    const ordered = await inDocumentOrder(this.app, file, data.annotations);
+    root.createDiv("at-bucket-title").setText(`${ordered.length} in this note`);
+    for (const a of ordered)
+      this.renderEntry(root, a, file.path);
+  }
+  // ── All ────────────────────────────────────────────────────────────────────
+  renderAll(root) {
+    const buckets = this.plugin.index.buckets();
+    const total = this.plugin.index.all().length;
+    if (total === 0) {
+      this.empty(root, "Nothing marked yet. Select text in a note to highlight it.");
+      return;
+    }
+    for (const key of BUCKET_ORDER) {
+      const entries = buckets[key];
+      if (entries.length === 0)
+        continue;
+      root.createDiv("at-bucket-title").setText(`${BUCKET_LABELS[key]} \xB7 ${entries.length}`);
+      for (const e of entries)
+        this.renderEntry(root, e.annotation, e.targetPath);
+    }
+  }
+  // ── Shared ─────────────────────────────────────────────────────────────────
+  empty(root, message) {
+    root.createDiv("at-empty").setText(message);
+  }
+  renderEntry(root, annotation, targetPath) {
+    var _a, _b;
+    const el = root.createDiv("at-entry");
+    el.setCssProps({ "--at-color": annotation.color });
+    el.createDiv("at-quote").setText(annotation.anchor.quote);
+    if (isComment(annotation)) {
+      el.createDiv("at-body").setText((_a = annotation.body) != null ? _a : "");
+    }
+    if (this.lens === "all" || this.resurfaced) {
+      const meta = el.createDiv("at-meta");
+      meta.createSpan({ text: (_b = targetPath.split("/").pop()) != null ? _b : targetPath, cls: "at-source" });
+      if (annotation.anchor.kind === "transcript") {
+        meta.createSpan({ text: fmtTime(annotation.anchor.start), cls: "at-time" });
+      }
+    }
+    el.addEventListener("click", () => {
+      void this.open(annotation, targetPath);
+    });
+  }
+  async open(annotation, targetPath) {
+    const file = this.app.vault.getAbstractFileByPath(targetPath);
+    if (!(file instanceof import_obsidian4.TFile))
+      return;
+    await revealInMarkdown(this.app, file, annotation);
+    await this.plugin.markReviewed({ targetPath, annotation });
+  }
+};
+function fmtTime(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+// src/store/annotationStore.ts
+var AnnotationStore = class {
+  constructor(app, index) {
+    this.app = app;
+    this.index = index;
+    this.cache = /* @__PURE__ */ new Map();
+    this.listeners = [];
+  }
+  /** Annotations for a file, from cache when we have it. */
+  async get(targetPath) {
+    const cached = this.cache.get(targetPath);
+    if (cached)
+      return cached;
+    const loaded = await loadSidecar(this.app, targetPath);
+    this.cache.set(targetPath, loaded);
+    return loaded;
+  }
+  /** Synchronous peek for render paths that can't await. Empty if not loaded. */
+  peek(targetPath) {
+    var _a, _b;
+    return (_b = (_a = this.cache.get(targetPath)) == null ? void 0 : _a.annotations) != null ? _b : [];
+  }
+  /** Load into the cache so a later peek() has something to paint. */
+  async warm(targetPath) {
+    await this.get(targetPath);
+    this.emit(targetPath);
+  }
+  async add(targetPath, annotation) {
+    const data = await this.get(targetPath);
+    data.annotations.push(annotation);
+    await this.commit(targetPath, data);
+  }
+  async update(targetPath, id, patch) {
+    const data = await this.get(targetPath);
+    const target = data.annotations.find((a) => a.id === id);
+    if (!target)
+      return;
+    Object.assign(target, patch, { updated: new Date().toISOString() });
+    await this.commit(targetPath, data);
+  }
+  async remove(targetPath, id) {
+    const data = await this.get(targetPath);
+    const before = data.annotations.length;
+    data.annotations = data.annotations.filter((a) => a.id !== id);
+    if (data.annotations.length === before)
+      return;
+    await this.commit(targetPath, data);
+  }
+  /** Drop a cache entry (after an external edit or a rename). */
+  forget(targetPath) {
+    this.cache.delete(targetPath);
+  }
+  async commit(targetPath, data) {
+    await saveSidecar(this.app, data);
+    this.cache.set(targetPath, data);
+    this.index.replaceFile(targetPath, data.annotations);
+    this.emit(targetPath);
+  }
+  onChange(listener) {
+    this.listeners.push(listener);
+    return () => {
+      this.listeners = this.listeners.filter((l) => l !== listener);
+    };
+  }
+  emit(targetPath) {
+    for (const l of this.listeners)
+      l(targetPath);
+  }
+};
+
+// src/hosts/markdown/MarkdownHost.ts
+var import_obsidian6 = require("obsidian");
 
 // src/ui/SelectionPopover.ts
 var SelectionPopover = class {
@@ -627,8 +750,8 @@ var CommentBubble = class {
 };
 
 // src/ui/CommentModal.ts
-var import_obsidian4 = require("obsidian");
-var CommentModal = class extends import_obsidian4.Modal {
+var import_obsidian5 = require("obsidian");
+var CommentModal = class extends import_obsidian5.Modal {
   constructor(app, quote, initial, onSubmit) {
     super(app);
     this.quote = quote;
@@ -651,7 +774,7 @@ var CommentModal = class extends import_obsidian4.Modal {
         this.submit();
       }
     });
-    new import_obsidian4.Setting(contentEl).addButton(
+    new import_obsidian5.Setting(contentEl).addButton(
       (b) => b.setButtonText("Save").setCta().onClick(() => this.submit())
     );
     window.setTimeout(() => input.focus(), 0);
@@ -707,12 +830,12 @@ var MarkdownHost = class {
         return;
       if (((_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim().length) != null ? _b : 0) > 0)
         return;
-      const file = (_c = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView)) == null ? void 0 : _c.file;
+      const file = (_c = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView)) == null ? void 0 : _c.file;
       if (file)
         void this.showBubble(file, hit);
     });
     this.plugin.registerDomEvent(document, "contextmenu", (e) => {
-      const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+      const view = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
       if (!(view == null ? void 0 : view.file) || view.getMode() !== "preview")
         return;
       if (!this.hasSomethingToOffer(view))
@@ -774,7 +897,7 @@ var MarkdownHost = class {
   }
   /** Selection finished: offer the swatches straight away, if asked to. */
   async onSelectionMade() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
     const file = view == null ? void 0 : view.file;
     if (!view || !file)
       return;
@@ -815,7 +938,7 @@ var MarkdownHost = class {
     const file = view.file;
     if (!file)
       return;
-    const menu = new import_obsidian5.Menu();
+    const menu = new import_obsidian6.Menu();
     const existing = (_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl");
     if (existing instanceof HTMLElement) {
       this.addExistingItems(menu, file, existing);
@@ -837,7 +960,7 @@ var MarkdownHost = class {
     const source = await this.app.vault.cachedRead(file);
     const at = nthOccurrence(source, selected, this.renderedOrdinal(view, selection, selected));
     if (at < 0) {
-      new import_obsidian5.Notice("Attention: cannot anchor a selection that crosses formatting.");
+      new import_obsidian6.Notice("Attention: cannot anchor a selection that crosses formatting.");
       return null;
     }
     return { kind: "markdown", ...describe(source, at, at + selected.length) };
@@ -935,11 +1058,11 @@ function rectOf(e) {
 // src/hosts/markdown/decorations.ts
 var import_view = require("@codemirror/view");
 var import_state = require("@codemirror/state");
-var import_obsidian6 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 var refreshAnnotations = import_state.StateEffect.define();
 function build(view, provider) {
   var _a, _b;
-  const path = (_b = (_a = view.state.field(import_obsidian6.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+  const path = (_b = (_a = view.state.field(import_obsidian7.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
   if (!path)
     return import_view.Decoration.none;
   const annotations = provider(path);
@@ -983,7 +1106,7 @@ function annotationDecorations(provider) {
 function repaintEditors(app) {
   app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
     const view = leaf.view;
-    if (!(view instanceof import_obsidian6.MarkdownView))
+    if (!(view instanceof import_obsidian7.MarkdownView))
       return;
     const cm = view.editor.cm;
     cm == null ? void 0 : cm.dispatch({ effects: refreshAnnotations.of() });
@@ -1034,7 +1157,7 @@ function isInsideHighlight(node) {
 }
 
 // src/main.ts
-var AttentionPlugin = class extends import_obsidian7.Plugin {
+var AttentionPlugin = class extends import_obsidian8.Plugin {
   constructor() {
     super(...arguments);
     this.markdownHost = null;
@@ -1054,7 +1177,7 @@ var AttentionPlugin = class extends import_obsidian7.Plugin {
     }));
     this.registerEvent(this.app.workspace.on("file-open", (file) => {
       if (file)
-        void this.store.warm(file.path);
+        void this.onFileOpen(file);
     }));
     this.app.workspace.onLayoutReady(() => {
       void this.rebuildIndex();
@@ -1081,6 +1204,14 @@ var AttentionPlugin = class extends import_obsidian7.Plugin {
   applyMarkStyle() {
     document.body.toggleClass("at-style-background", this.settings.markStyle === "background");
   }
+  async onFileOpen(file) {
+    await this.store.warm(file.path);
+    if (!this.settings.autoRevealPanel)
+      return;
+    if (this.store.peek(file.path).length === 0)
+      return;
+    await this.openReview({ focus: false });
+  }
   setupMarkdownHost() {
     const provider = (path) => this.store.peek(path);
     this.registerEditorExtension(annotationDecorations(provider));
@@ -1092,7 +1223,7 @@ var AttentionPlugin = class extends import_obsidian7.Plugin {
   rerenderReadingViews() {
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (view instanceof import_obsidian7.MarkdownView && view.getMode() === "preview") {
+      if (view instanceof import_obsidian8.MarkdownView && view.getMode() === "preview") {
         view.previewMode.rerender(true);
       }
     }
@@ -1111,22 +1242,30 @@ var AttentionPlugin = class extends import_obsidian7.Plugin {
     await saveSidecar(this.app, data);
     this.index.replaceFile(entry.targetPath, data.annotations);
   }
-  async openReview() {
+  /**
+   * Show the panel. `focus: false` is used when opening it on the user's behalf
+   * — revealing a sidebar is helpful, stealing the cursor mid-sentence is not.
+   */
+  async openReview({ focus = true } = {}) {
+    var _a;
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW);
-    if (existing.length > 0) {
-      await this.app.workspace.revealLeaf(existing[0]);
-      return;
-    }
-    const leaf = this.app.workspace.getRightLeaf(false);
+    const leaf = (_a = existing[0]) != null ? _a : this.app.workspace.getRightLeaf(false);
     if (!leaf)
       return;
-    await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: true });
+    if (existing.length === 0) {
+      await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: focus });
+    }
     await this.app.workspace.revealLeaf(leaf);
+    if (!focus) {
+      const editor = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+      if (editor)
+        this.app.workspace.setActiveLeaf(editor.leaf, { focus: true });
+    }
   }
   refreshReviewViews() {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW)) {
       if (leaf.view instanceof ReviewView)
-        leaf.view.render();
+        void leaf.view.render();
     }
   }
   /**
@@ -1134,10 +1273,10 @@ var AttentionPlugin = class extends import_obsidian7.Plugin {
    * is a sibling, so it travels with the folder — only a file's own rename does.
    */
   async handleRename(file, oldPath) {
-    if (!(file instanceof import_obsidian7.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian8.TFile) || isSidecarPath(file.path))
       return;
     const old = this.app.vault.getAbstractFileByPath(sidecarPathFor(oldPath));
-    if (!(old instanceof import_obsidian7.TFile))
+    if (!(old instanceof import_obsidian8.TFile))
       return;
     const nextPath = sidecarPathFor(file.path);
     if (old.path === nextPath)
@@ -1150,17 +1289,17 @@ var AttentionPlugin = class extends import_obsidian7.Plugin {
       this.index.renameFile(oldPath, file.path);
       this.refreshReviewViews();
     } catch (e) {
-      new import_obsidian7.Notice(`Attention: could not move annotations for ${file.name}`);
+      new import_obsidian8.Notice(`Attention: could not move annotations for ${file.name}`);
       console.error(e);
     }
   }
   async handleDelete(file) {
-    if (!(file instanceof import_obsidian7.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian8.TFile) || isSidecarPath(file.path))
       return;
     if (this.settings.keepOrphanedSidecars)
       return;
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
-    if (sidecar instanceof import_obsidian7.TFile)
+    if (sidecar instanceof import_obsidian8.TFile)
       await this.app.fileManager.trashFile(sidecar);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);
