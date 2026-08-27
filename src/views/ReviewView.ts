@@ -31,6 +31,13 @@ type Lens = 'file' | 'all';
 
 export class ReviewView extends ItemView {
   private lens: Lens = 'file';
+  /**
+   * Bumped on every render. Rendering empties the panel, then awaits a file
+   * read before appending; two overlapping calls would each empty and then each
+   * append, listing everything twice. A render whose generation has been
+   * superseded stops instead of drawing.
+   */
+  private generation = 0;
   private resurfaced: IndexEntry[] | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: AttentionPlugin) {
@@ -42,15 +49,14 @@ export class ReviewView extends ItemView {
   getIcon() { return 'highlighter'; }
 
   async onOpen() {
-    console.log('[attention] panel opened');
     this.registerEvent(this.app.workspace.on('file-open', () => { void this.render(); }));
     await this.render();
   }
 
   /** Re-render. Safe to call from anywhere; it reads current state itself. */
   async render(): Promise<void> {
+    const seq = ++this.generation;
     const root = this.contentEl;
-    console.log('[attention] panel render, lens =', this.lens);
     root.empty();
     root.addClass('at-review');
 
@@ -61,7 +67,7 @@ export class ReviewView extends ItemView {
       return;
     }
 
-    if (this.lens === 'file') await this.renderFile(root);
+    if (this.lens === 'file') await this.renderFile(root, seq);
     else this.renderAll(root);
   }
 
@@ -93,7 +99,7 @@ export class ReviewView extends ItemView {
 
   // ── This note ──────────────────────────────────────────────────────────────
 
-  private async renderFile(root: HTMLElement): Promise<void> {
+  private async renderFile(root: HTMLElement, seq: number): Promise<void> {
     const file = this.app.workspace.getActiveFile();
     if (!file) {
       this.empty(root, 'No note open.');
@@ -101,6 +107,7 @@ export class ReviewView extends ItemView {
     }
 
     const data = await this.plugin.store.get(file.path);
+    if (seq !== this.generation) return;
     if (data.annotations.length === 0) {
       this.empty(root, `Nothing marked in “${file.basename}”.`);
       return;
@@ -108,6 +115,7 @@ export class ReviewView extends ItemView {
 
     // An outline follows the document, not the order things were made in.
     const ordered = await inDocumentOrder(this.app, file, data.annotations);
+    if (seq !== this.generation) return;
     root.createDiv('at-bucket-title').setText(`${ordered.length} in this note`);
     for (const a of ordered) this.renderEntry(root, a, file.path);
   }
@@ -155,10 +163,13 @@ export class ReviewView extends ItemView {
       }
     }
 
-    el.addEventListener('click', () => { void this.open(annotation, targetPath); });
+    el.addEventListener('click', () => { void this.jumpTo(annotation, targetPath); });
   }
 
-  private async open(annotation: Annotation, targetPath: string): Promise<void> {
+  // Named jumpTo, not open: View.prototype.open is what Obsidian calls to mount
+  // a view, and shadowing it leaves the view constructed but never attached —
+  // a panel that renders correctly into an element that is not in the document.
+  private async jumpTo(annotation: Annotation, targetPath: string): Promise<void> {
     const file = this.app.vault.getAbstractFileByPath(targetPath);
     if (!(file instanceof TFile)) return;
 

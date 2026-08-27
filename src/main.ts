@@ -1,4 +1,5 @@
 import { Plugin, TFile, TAbstractFile, WorkspaceLeaf, Notice, MarkdownView } from 'obsidian';
+
 import { AttentionSettings, DEFAULT_SETTINGS, AttentionSettingTab } from './settings';
 import { AttentionIndex } from './store/attentionIndex';
 import { IndexEntry } from './store/review';
@@ -27,6 +28,7 @@ export default class AttentionPlugin extends Plugin {
 
     this.registerView(VIEW_TYPE_REVIEW, leaf => new ReviewView(leaf, this));
 
+
     this.applyMarkStyle();
 
     if (this.settings.enableMarkdownHost) this.setupMarkdownHost();
@@ -52,15 +54,6 @@ export default class AttentionPlugin extends Plugin {
     this.addRibbonIcon('highlighter', 'Attention', () => { void this.openReview(); });
 
     this.addCommand({
-      id: 'rebuild-panel',
-      name: 'Rebuild attention panel',
-      callback: () => {
-        this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW).forEach(l => l.detach());
-        void this.openReview();
-      },
-    });
-
-    this.addCommand({
       id: 'open-review',
       name: 'Open attention review',
       callback: () => { void this.openReview(); },
@@ -83,28 +76,11 @@ export default class AttentionPlugin extends Plugin {
   }
 
   private async onLayoutReady(): Promise<void> {
-    this.reclaimStaleLeaves();
     await this.rebuildIndex();
     // Notes open at load time never fire `file-open`, so without this their
     // highlights stay unpainted until you switch away and back — which is
     // exactly what happens on every hot reload.
     await this.warmOpenFiles();
-  }
-
-  /**
-   * Discard panels left behind by a previous load of this plugin.
-   *
-   * setViewState on the stale leaf isn't enough — a leaf restored before the
-   * view type was registered, or orphaned by a reload, can stay wedged holding
-   * a placeholder. Detaching and letting it be recreated always works, and
-   * costs nothing: the panel holds no state worth preserving.
-   */
-  private reclaimStaleLeaves(): void {
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW)) {
-      if (leaf.view instanceof ReviewView) continue;
-      console.log('[attention] discarding a stale panel leaf');
-      leaf.detach();
-    }
   }
 
   private async warmOpenFiles(): Promise<void> {
@@ -165,7 +141,15 @@ export default class AttentionPlugin extends Plugin {
    * Show the panel. `focus: false` is used when opening it on the user's behalf
    * — revealing a sidebar is helpful, stealing the cursor mid-sentence is not.
    */
-  private async openReview({ focus = true }: { focus?: boolean } = {}): Promise<void> {
+  private opening: Promise<void> | null = null;
+
+  private async openReview(opts: { focus?: boolean } = {}): Promise<void> {
+    // Opening twice concurrently would race two mounts of the same view type.
+    this.opening = (this.opening ?? Promise.resolve()).then(() => this.doOpenReview(opts));
+    return this.opening;
+  }
+
+  private async doOpenReview({ focus = true }: { focus?: boolean } = {}): Promise<void> {
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW);
     const leaf: WorkspaceLeaf | null =
       existing[0] ?? this.app.workspace.getRightLeaf(false);
@@ -179,16 +163,11 @@ export default class AttentionPlugin extends Plugin {
     if (!(leaf.view instanceof ReviewView)) {
       await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: focus });
     }
-    if (!(leaf.view instanceof ReviewView)) {
-      // Still not ours: the leaf is wedged. Throw it away and build a new one.
-      console.log('[attention] panel leaf would not take the view; recreating');
-      leaf.detach();
-      const fresh = this.app.workspace.getRightLeaf(false);
-      if (!fresh) return;
-      await fresh.setViewState({ type: VIEW_TYPE_REVIEW, active: focus });
-      await this.app.workspace.revealLeaf(fresh);
-      return;
-    }
+
+    // A sidebar leaf restored from the last session is *deferred*: its view is
+    // constructed, so `instanceof` passes, but onOpen hasn't run and contentEl
+    // is not in the document. Rendering into it succeeds and shows nothing.
+    await leaf.loadIfDeferred();
     await this.app.workspace.revealLeaf(leaf);
 
     if (!focus) {
@@ -199,6 +178,9 @@ export default class AttentionPlugin extends Plugin {
 
   private refreshReviewViews(): void {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW)) {
+      // Deferred leaves aren't in the document yet; they render on open.
+      if (leaf.isDeferred) continue;
+      if (!leaf.view.containerEl.isConnected) continue;
       if (leaf.view instanceof ReviewView) void leaf.view.render();
     }
   }

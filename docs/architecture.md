@@ -236,6 +236,41 @@ npm test       # vitest
 `styles.css` 不是 esbuild 的输入，所以单独 watch —— 改 CSS 不必去碰某个 .ts 文件
 才能触发部署。
 
+### 用 CDP 直接调试运行中的 Obsidian
+
+Obsidian 是 Electron 壳，可以开远程调试口，然后像调浏览器一样连上去：
+
+```bash
+osascript -e 'tell application "Obsidian" to quit'
+open -a Obsidian --args --remote-debugging-port=9333
+```
+
+之后 `curl http://127.0.0.1:9333/json/list` 拿到渲染进程的 target，用
+`Runtime.evaluate` 就能在 Obsidian 的上下文里跑任意 JS —— 读 `app.workspace`、
+遍历 leaf、`app.plugins.disablePlugin/enablePlugin` 强制重载、挂
+`MutationObserver` 看 DOM 变动、抓 `Runtime.consoleAPICalled` 收控制台。
+
+**注意**：用 `nohup` 后台拉起时窗口不会被正常呈现，量出来的 `getBoundingClientRect`
+全是 0，挂载状态也不可信。必须 `osascript -e 'tell application "Obsidian" to activate'`
+之后再测。
+
+这套东西的价值在「面板一片空白」那次体现得最清楚：静态读代码猜了五六轮都没中，
+连上 CDP 之后三条命令就定位到 `contentEl` 根本不在文档里，再二分到具体那一行。
+
+### 一类必须防的 bug：遮蔽基类成员
+
+`ReviewView extends ItemView`，而 `View.prototype.open` **正是 Obsidian 用来挂载
+视图的方法**。我定义了一个 `private async open(annotation, targetPath)` 把它盖掉，
+于是 Obsidian 调 `view.open()` 进了我的方法、参数是 undefined、第一个 if 直接
+return —— 视图构造成功、`render()` 也画得好好的，但**整棵 DOM 从未进入文档**。
+
+同一类问题之前还撞过一次：`private scope` 遮蔽 `View.scope`（键盘作用域）。
+那次编译器报了错，因为类型不兼容；`open` 这次类型恰好兼容，**编译器沉默**。
+
+`tests/baseClassCollisions.test.ts` 就是为此存在的：把真实 Obsidian 里
+`ItemView` 原型链上的成员名抓出来，扫 `src/views/*.ts` 里声明的成员，撞了就炸。
+它还带一条自证用例，确保检测器本身有效。
+
 ### 冒烟测试（`npm run smoke`）
 
 `scripts/smoke.cjs` 用 stub 顶掉 `obsidian` 和 `@codemirror/*`，在 Node 里

@@ -430,6 +430,13 @@ var ReviewView = class extends import_obsidian4.ItemView {
     super(leaf);
     this.plugin = plugin;
     this.lens = "file";
+    /**
+     * Bumped on every render. Rendering empties the panel, then awaits a file
+     * read before appending; two overlapping calls would each empty and then each
+     * append, listing everything twice. A render whose generation has been
+     * superseded stops instead of drawing.
+     */
+    this.generation = 0;
     this.resurfaced = null;
   }
   getViewType() {
@@ -442,7 +449,6 @@ var ReviewView = class extends import_obsidian4.ItemView {
     return "highlighter";
   }
   async onOpen() {
-    console.log("[attention] panel opened");
     this.registerEvent(this.app.workspace.on("file-open", () => {
       void this.render();
     }));
@@ -450,8 +456,8 @@ var ReviewView = class extends import_obsidian4.ItemView {
   }
   /** Re-render. Safe to call from anywhere; it reads current state itself. */
   async render() {
+    const seq = ++this.generation;
     const root = this.contentEl;
-    console.log("[attention] panel render, lens =", this.lens);
     root.empty();
     root.addClass("at-review");
     this.renderHeader(root);
@@ -461,7 +467,7 @@ var ReviewView = class extends import_obsidian4.ItemView {
       return;
     }
     if (this.lens === "file")
-      await this.renderFile(root);
+      await this.renderFile(root, seq);
     else
       this.renderAll(root);
   }
@@ -489,18 +495,22 @@ var ReviewView = class extends import_obsidian4.ItemView {
     });
   }
   // ── This note ──────────────────────────────────────────────────────────────
-  async renderFile(root) {
+  async renderFile(root, seq) {
     const file = this.app.workspace.getActiveFile();
     if (!file) {
       this.empty(root, "No note open.");
       return;
     }
     const data = await this.plugin.store.get(file.path);
+    if (seq !== this.generation)
+      return;
     if (data.annotations.length === 0) {
       this.empty(root, `Nothing marked in \u201C${file.basename}\u201D.`);
       return;
     }
     const ordered = await inDocumentOrder(this.app, file, data.annotations);
+    if (seq !== this.generation)
+      return;
     root.createDiv("at-bucket-title").setText(`${ordered.length} in this note`);
     for (const a of ordered)
       this.renderEntry(root, a, file.path);
@@ -542,10 +552,13 @@ var ReviewView = class extends import_obsidian4.ItemView {
       }
     }
     el.addEventListener("click", () => {
-      void this.open(annotation, targetPath);
+      void this.jumpTo(annotation, targetPath);
     });
   }
-  async open(annotation, targetPath) {
+  // Named jumpTo, not open: View.prototype.open is what Obsidian calls to mount
+  // a view, and shadowing it leaves the view constructed but never attached —
+  // a panel that renders correctly into an element that is not in the document.
+  async jumpTo(annotation, targetPath) {
     const file = this.app.vault.getAbstractFileByPath(targetPath);
     if (!(file instanceof import_obsidian4.TFile))
       return;
@@ -1178,6 +1191,11 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
   constructor() {
     super(...arguments);
     this.markdownHost = null;
+    /**
+     * Show the panel. `focus: false` is used when opening it on the user's behalf
+     * — revealing a sidebar is helpful, stealing the cursor mid-sentence is not.
+     */
+    this.opening = null;
   }
   async onload() {
     await this.loadSettings();
@@ -1203,14 +1221,6 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
       void this.openReview();
     });
     this.addCommand({
-      id: "rebuild-panel",
-      name: "Rebuild attention panel",
-      callback: () => {
-        this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW).forEach((l) => l.detach());
-        void this.openReview();
-      }
-    });
-    this.addCommand({
       id: "open-review",
       name: "Open attention review",
       callback: () => {
@@ -1230,25 +1240,8 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
     document.body.toggleClass("at-style-background", this.settings.markStyle === "background");
   }
   async onLayoutReady() {
-    this.reclaimStaleLeaves();
     await this.rebuildIndex();
     await this.warmOpenFiles();
-  }
-  /**
-   * Discard panels left behind by a previous load of this plugin.
-   *
-   * setViewState on the stale leaf isn't enough — a leaf restored before the
-   * view type was registered, or orphaned by a reload, can stay wedged holding
-   * a placeholder. Detaching and letting it be recreated always works, and
-   * costs nothing: the panel holds no state worth preserving.
-   */
-  reclaimStaleLeaves() {
-    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW)) {
-      if (leaf.view instanceof ReviewView)
-        continue;
-      console.log("[attention] discarding a stale panel leaf");
-      leaf.detach();
-    }
   }
   async warmOpenFiles() {
     const paths = /* @__PURE__ */ new Set();
@@ -1297,11 +1290,12 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
     await saveSidecar(this.app, data);
     this.index.replaceFile(entry.targetPath, data.annotations);
   }
-  /**
-   * Show the panel. `focus: false` is used when opening it on the user's behalf
-   * — revealing a sidebar is helpful, stealing the cursor mid-sentence is not.
-   */
-  async openReview({ focus = true } = {}) {
+  async openReview(opts = {}) {
+    var _a;
+    this.opening = ((_a = this.opening) != null ? _a : Promise.resolve()).then(() => this.doOpenReview(opts));
+    return this.opening;
+  }
+  async doOpenReview({ focus = true } = {}) {
     var _a;
     const existing = this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW);
     const leaf = (_a = existing[0]) != null ? _a : this.app.workspace.getRightLeaf(false);
@@ -1310,16 +1304,7 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
     if (!(leaf.view instanceof ReviewView)) {
       await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: focus });
     }
-    if (!(leaf.view instanceof ReviewView)) {
-      console.log("[attention] panel leaf would not take the view; recreating");
-      leaf.detach();
-      const fresh = this.app.workspace.getRightLeaf(false);
-      if (!fresh)
-        return;
-      await fresh.setViewState({ type: VIEW_TYPE_REVIEW, active: focus });
-      await this.app.workspace.revealLeaf(fresh);
-      return;
-    }
+    await leaf.loadIfDeferred();
     await this.app.workspace.revealLeaf(leaf);
     if (!focus) {
       const editor = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
@@ -1329,6 +1314,10 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
   }
   refreshReviewViews() {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW)) {
+      if (leaf.isDeferred)
+        continue;
+      if (!leaf.view.containerEl.isConnected)
+        continue;
       if (leaf.view instanceof ReviewView)
         void leaf.view.render();
     }
