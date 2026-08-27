@@ -11,6 +11,20 @@ is never modified**.
 > a third-party service. This one resurfaces the passages *you* marked, wherever you
 > marked them.
 
+## Using it
+
+Right-click a selection in a note:
+
+- **Highlight** — in the default colour
+- **Highlight in colour…** — pick from the palette
+- **Comment…** — write a note against the passage (⌘/Ctrl+Enter saves)
+
+Right-click an existing highlight to edit its comment, change its colour, or
+remove it. In editing modes these are appended to Obsidian's own context menu;
+reading mode gets its own, raised only when there is something to offer.
+
+The ribbon's highlighter icon opens the review panel.
+
 ## Status
 
 Early. The storage layer, the attention index and the review panel work; the

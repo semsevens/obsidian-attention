@@ -1,5 +1,5 @@
-import { App, MarkdownView, Notice, Plugin, TFile } from 'obsidian';
-import { Annotation, MarkdownAnchor, newId, isComment } from '../../model';
+import { App, Editor, Menu, MarkdownView, MarkdownFileInfo, Notice, Plugin, TFile } from 'obsidian';
+import { Annotation, MarkdownAnchor, newId } from '../../model';
 import { describe, nthOccurrence, countOccurrences } from '../../anchor/textQuote';
 import { AnnotationStore } from '../../store/annotationStore';
 import { SelectionPopover } from '../../ui/SelectionPopover';
@@ -7,13 +7,14 @@ import { CommentModal } from '../../ui/CommentModal';
 import { AttentionSettings } from '../../settings';
 
 /**
- * Turns a selection in a markdown note into an annotation.
+ * Turns a selection in a markdown note into an annotation, via the right-click
+ * menu.
  *
  * Capture works differently in the two modes, because only one of them has the
  * source in front of it:
  *
  *   Live Preview / source — the editor *is* the document, so `posToOffset`
- *     gives exact source offsets.
+ *     gives exact source offsets, synchronously.
  *   Reading mode — the DOM is rendered HTML with no source offsets at all.
  *     We take the selected text and find the matching occurrence in the file by
  *     counting how many identical strings precede it on screen; rendering drops
@@ -21,6 +22,8 @@ import { AttentionSettings } from '../../settings';
  */
 export class MarkdownHost {
   private popover: SelectionPopover;
+  /** The element right-clicked, captured before any menu is built. */
+  private lastTarget: HTMLElement | null = null;
 
   constructor(
     private app: App,
@@ -32,9 +35,30 @@ export class MarkdownHost {
   }
 
   register(): void {
-    this.plugin.registerDomEvent(document, 'mouseup', e => {
-      // Let the click settle so the selection and any click target are final.
-      window.setTimeout(() => { void this.handleMouseUp(e); }, 0);
+    // Capture phase, so this runs before Obsidian builds its own menu below.
+    this.plugin.registerDomEvent(
+      document,
+      'contextmenu',
+      e => { this.lastTarget = e.target instanceof HTMLElement ? e.target : null; },
+      true,
+    );
+
+    // Editing modes: append to Obsidian's native menu rather than replacing it,
+    // so cut/copy/paste and everything else stay where people expect.
+    this.plugin.registerEvent(
+      this.app.workspace.on('editor-menu', (menu, editor, info) => {
+        this.onEditorMenu(menu, editor, info);
+      }),
+    );
+
+    // Reading mode fires no editor-menu, so it needs its own handler. Only
+    // intercept when there is actually something to offer.
+    this.plugin.registerDomEvent(document, 'contextmenu', e => {
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!view?.file || view.getMode() !== 'preview') return;
+      if (!this.hasSomethingToOffer(view)) return;
+      e.preventDefault();
+      void this.showReadingMenu(e, view);
     });
   }
 
@@ -42,59 +66,64 @@ export class MarkdownHost {
     this.popover.hide();
   }
 
-  private async handleMouseUp(e: MouseEvent): Promise<void> {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!view?.file) return;
-
-    // Clicking an existing highlight opens it rather than starting a new one.
-    const hit = (e.target as HTMLElement | null)?.closest?.('.at-hl');
+  private hasSomethingToOffer(view: MarkdownView): boolean {
+    if (this.lastTarget?.closest('.at-hl')) return true;
     const selection = window.getSelection();
-    const selected = selection?.toString() ?? '';
+    return (
+      (selection?.toString().trim().length ?? 0) > 0 &&
+      view.contentEl.contains(selection?.anchorNode ?? null)
+    );
+  }
 
-    if (hit instanceof HTMLElement && selected.length === 0) {
-      await this.openExisting(view.file, hit);
+  // ── Editing modes ──────────────────────────────────────────────────────────
+
+  private onEditorMenu(menu: Menu, editor: Editor, info: MarkdownView | MarkdownFileInfo): void {
+    const file = info.file;
+    if (!file) return;
+
+    const existing = this.lastTarget?.closest('.at-hl');
+    if (existing instanceof HTMLElement) {
+      this.addExistingItems(menu, file, existing);
       return;
     }
 
-    if (selected.trim().length === 0) return;
-    if (!selection || !view.contentEl.contains(selection.anchorNode)) return;
+    const from = editor.posToOffset(editor.getCursor('from'));
+    const to = editor.posToOffset(editor.getCursor('to'));
+    if (from === to) return;
 
-    const anchor = await this.capture(view, selection, selected);
-    if (!anchor) return;
-
-    const rect = selection.getRangeAt(0).getBoundingClientRect();
-    const file = view.file;
-    this.popover.showAt(rect, {
-      onHighlight: color => { void this.create(file, anchor, color, null); },
-      onComment: () => {
-        new CommentModal(this.app, anchor.quote, '', body => {
-          void this.create(file, anchor, this.settings.defaultColor, body || null);
-        }).open();
-      },
-    });
+    const anchor: MarkdownAnchor = {
+      kind: 'markdown',
+      ...describe(editor.getValue(), from, to),
+    };
+    this.addCreateItems(menu, file, anchor);
   }
 
-  /** Build a source-anchored range from whatever the user selected. */
-  private async capture(
-    view: MarkdownView,
-    selection: Selection,
-    selected: string,
-  ): Promise<MarkdownAnchor | null> {
-    if (view.getMode() === 'source') {
-      const editor = view.editor;
-      const from = editor.posToOffset(editor.getCursor('from'));
-      const to = editor.posToOffset(editor.getCursor('to'));
-      if (from === to) return null;
-      return { kind: 'markdown', ...describe(editor.getValue(), from, to) };
-    }
+  // ── Reading mode ───────────────────────────────────────────────────────────
 
-    // Reading mode: no offsets, so locate the selection by ordinal.
+  private async showReadingMenu(e: MouseEvent, view: MarkdownView): Promise<void> {
     const file = view.file;
-    if (!file) return null;
-    const source = await this.app.vault.cachedRead(file);
+    if (!file) return;
+    const menu = new Menu();
 
-    const ordinal = this.renderedOrdinal(view, selection, selected);
-    const at = nthOccurrence(source, selected, ordinal);
+    const existing = this.lastTarget?.closest('.at-hl');
+    if (existing instanceof HTMLElement) {
+      this.addExistingItems(menu, file, existing);
+    } else {
+      const anchor = await this.captureRendered(view, file);
+      if (!anchor) return;
+      this.addCreateItems(menu, file, anchor);
+    }
+    menu.showAtMouseEvent(e);
+  }
+
+  /** Locate a reading-mode selection in the source by ordinal. */
+  private async captureRendered(view: MarkdownView, file: TFile): Promise<MarkdownAnchor | null> {
+    const selection = window.getSelection();
+    const selected = selection?.toString() ?? '';
+    if (!selection || selected.trim().length === 0) return null;
+
+    const source = await this.app.vault.cachedRead(file);
+    const at = nthOccurrence(source, selected, this.renderedOrdinal(view, selection, selected));
     if (at < 0) {
       // The selection spans rendered markup (e.g. from plain text into bold),
       // so the exact string never appears in the source.
@@ -106,10 +135,98 @@ export class MarkdownHost {
 
   /** How many identical strings precede this selection on screen. */
   private renderedOrdinal(view: MarkdownView, selection: Selection, selected: string): number {
-    const range = selection.getRangeAt(0).cloneRange();
-    range.selectNodeContents(view.contentEl);
-    range.setEnd(selection.getRangeAt(0).startContainer, selection.getRangeAt(0).startOffset);
-    return countOccurrences(range.toString(), selected);
+    const sel = selection.getRangeAt(0);
+    const before = sel.cloneRange();
+    before.selectNodeContents(view.contentEl);
+    before.setEnd(sel.startContainer, sel.startOffset);
+    return countOccurrences(before.toString(), selected);
+  }
+
+  // ── Menu items ─────────────────────────────────────────────────────────────
+
+  private addCreateItems(menu: Menu, file: TFile, anchor: MarkdownAnchor): void {
+    menu.addItem(item =>
+      item
+        .setTitle('Highlight')
+        .setIcon('highlighter')
+        .setSection('attention')
+        .onClick(() => { void this.create(file, anchor, this.settings.defaultColor, null); }),
+    );
+
+    menu.addItem(item =>
+      item
+        .setTitle('Highlight in colour…')
+        .setIcon('palette')
+        .setSection('attention')
+        // MenuItem has no submenu in the public API, so the swatches reuse the
+        // popover — opened deliberately here rather than on every selection.
+        .onClick(e => {
+          this.popover.showAt(rectOf(e), {
+            onHighlight: color => { void this.create(file, anchor, color, null); },
+            onComment: () => this.promptComment(file, anchor, ''),
+          });
+        }),
+    );
+
+    menu.addItem(item =>
+      item
+        .setTitle('Comment…')
+        .setIcon('message-square')
+        .setSection('attention')
+        .onClick(() => this.promptComment(file, anchor, '')),
+    );
+  }
+
+  private addExistingItems(menu: Menu, file: TFile, el: HTMLElement): void {
+    const id = el.dataset.atId;
+    if (!id) return;
+
+    menu.addItem(item =>
+      item
+        .setTitle('Edit comment…')
+        .setIcon('message-square')
+        .setSection('attention')
+        .onClick(() => { void this.editComment(file, id); }),
+    );
+
+    menu.addItem(item =>
+      item
+        .setTitle('Change colour…')
+        .setIcon('palette')
+        .setSection('attention')
+        .onClick(() => {
+          this.popover.showAt(el.getBoundingClientRect(), {
+            onHighlight: color => { void this.store.update(file.path, id, { color }); },
+            onComment: () => { void this.editComment(file, id); },
+          });
+        }),
+    );
+
+    menu.addItem(item =>
+      item
+        .setTitle('Remove highlight')
+        .setIcon('trash')
+        .setSection('attention')
+        .setWarning(true)
+        .onClick(() => { void this.store.remove(file.path, id); }),
+    );
+  }
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+
+  private promptComment(file: TFile, anchor: MarkdownAnchor, initial: string): void {
+    new CommentModal(this.app, anchor.quote, initial, body => {
+      void this.create(file, anchor, this.settings.defaultColor, body || null);
+    }).open();
+  }
+
+  private async editComment(file: TFile, id: string): Promise<void> {
+    const data = await this.store.get(file.path);
+    const annotation = data.annotations.find(a => a.id === id);
+    if (!annotation) return;
+    new CommentModal(this.app, annotation.anchor.quote, annotation.body ?? '', body => {
+      void this.store.update(file.path, id, { body: body || null });
+    }).open();
   }
 
   private async create(
@@ -128,25 +245,11 @@ export class MarkdownHost {
     };
     await this.store.add(file.path, annotation);
   }
-
-  private async openExisting(file: TFile, el: HTMLElement): Promise<void> {
-    const id = el.dataset.atId;
-    if (!id) return;
-    const data = await this.store.get(file.path);
-    const annotation = data.annotations.find(a => a.id === id);
-    if (!annotation) return;
-
-    const rect = el.getBoundingClientRect();
-    this.popover.showAt(rect, {
-      onHighlight: color => { void this.store.update(file.path, id, { color }); },
-      onComment: () => {
-        new CommentModal(this.app, annotation.anchor.quote, annotation.body ?? '', body => {
-          void this.store.update(file.path, id, { body: body || null });
-        }).open();
-      },
-      onRemove: () => { void this.store.remove(file.path, id); },
-    });
-  }
 }
 
-export { isComment };
+/** A zero-size rect at the pointer, so the popover can position itself. */
+function rectOf(e: MouseEvent | KeyboardEvent): DOMRect {
+  const x = e instanceof MouseEvent ? e.clientX : window.innerWidth / 2;
+  const y = e instanceof MouseEvent ? e.clientY : window.innerHeight / 2;
+  return new DOMRect(x, y, 0, 0);
+}

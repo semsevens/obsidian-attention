@@ -596,66 +596,92 @@ var MarkdownHost = class {
     this.plugin = plugin;
     this.store = store;
     this.settings = settings;
+    /** The element right-clicked, captured before any menu is built. */
+    this.lastTarget = null;
     this.popover = new SelectionPopover(settings.colors);
   }
   register() {
-    this.plugin.registerDomEvent(document, "mouseup", (e) => {
-      window.setTimeout(() => {
-        void this.handleMouseUp(e);
-      }, 0);
+    this.plugin.registerDomEvent(
+      document,
+      "contextmenu",
+      (e) => {
+        this.lastTarget = e.target instanceof HTMLElement ? e.target : null;
+      },
+      true
+    );
+    this.plugin.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, editor, info) => {
+        this.onEditorMenu(menu, editor, info);
+      })
+    );
+    this.plugin.registerDomEvent(document, "contextmenu", (e) => {
+      const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+      if (!(view == null ? void 0 : view.file) || view.getMode() !== "preview")
+        return;
+      if (!this.hasSomethingToOffer(view))
+        return;
+      e.preventDefault();
+      void this.showReadingMenu(e, view);
     });
   }
   detach() {
     this.popover.hide();
   }
-  async handleMouseUp(e) {
+  hasSomethingToOffer(view) {
     var _a, _b, _c;
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
-    if (!(view == null ? void 0 : view.file))
-      return;
-    const hit = (_b = (_a = e.target) == null ? void 0 : _a.closest) == null ? void 0 : _b.call(_a, ".at-hl");
+    if ((_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl"))
+      return true;
     const selection = window.getSelection();
-    const selected = (_c = selection == null ? void 0 : selection.toString()) != null ? _c : "";
-    if (hit instanceof HTMLElement && selected.length === 0) {
-      await this.openExisting(view.file, hit);
-      return;
-    }
-    if (selected.trim().length === 0)
-      return;
-    if (!selection || !view.contentEl.contains(selection.anchorNode))
-      return;
-    const anchor = await this.capture(view, selection, selected);
-    if (!anchor)
-      return;
-    const rect = selection.getRangeAt(0).getBoundingClientRect();
-    const file = view.file;
-    this.popover.showAt(rect, {
-      onHighlight: (color) => {
-        void this.create(file, anchor, color, null);
-      },
-      onComment: () => {
-        new CommentModal(this.app, anchor.quote, "", (body) => {
-          void this.create(file, anchor, this.settings.defaultColor, body || null);
-        }).open();
-      }
-    });
+    return ((_b = selection == null ? void 0 : selection.toString().trim().length) != null ? _b : 0) > 0 && view.contentEl.contains((_c = selection == null ? void 0 : selection.anchorNode) != null ? _c : null);
   }
-  /** Build a source-anchored range from whatever the user selected. */
-  async capture(view, selection, selected) {
-    if (view.getMode() === "source") {
-      const editor = view.editor;
-      const from = editor.posToOffset(editor.getCursor("from"));
-      const to = editor.posToOffset(editor.getCursor("to"));
-      if (from === to)
-        return null;
-      return { kind: "markdown", ...describe(editor.getValue(), from, to) };
+  // ── Editing modes ──────────────────────────────────────────────────────────
+  onEditorMenu(menu, editor, info) {
+    var _a;
+    const file = info.file;
+    if (!file)
+      return;
+    const existing = (_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl");
+    if (existing instanceof HTMLElement) {
+      this.addExistingItems(menu, file, existing);
+      return;
     }
+    const from = editor.posToOffset(editor.getCursor("from"));
+    const to = editor.posToOffset(editor.getCursor("to"));
+    if (from === to)
+      return;
+    const anchor = {
+      kind: "markdown",
+      ...describe(editor.getValue(), from, to)
+    };
+    this.addCreateItems(menu, file, anchor);
+  }
+  // ── Reading mode ───────────────────────────────────────────────────────────
+  async showReadingMenu(e, view) {
+    var _a;
     const file = view.file;
     if (!file)
+      return;
+    const menu = new import_obsidian5.Menu();
+    const existing = (_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl");
+    if (existing instanceof HTMLElement) {
+      this.addExistingItems(menu, file, existing);
+    } else {
+      const anchor = await this.captureRendered(view, file);
+      if (!anchor)
+        return;
+      this.addCreateItems(menu, file, anchor);
+    }
+    menu.showAtMouseEvent(e);
+  }
+  /** Locate a reading-mode selection in the source by ordinal. */
+  async captureRendered(view, file) {
+    var _a;
+    const selection = window.getSelection();
+    const selected = (_a = selection == null ? void 0 : selection.toString()) != null ? _a : "";
+    if (!selection || selected.trim().length === 0)
       return null;
     const source = await this.app.vault.cachedRead(file);
-    const ordinal = this.renderedOrdinal(view, selection, selected);
-    const at = nthOccurrence(source, selected, ordinal);
+    const at = nthOccurrence(source, selected, this.renderedOrdinal(view, selection, selected));
     if (at < 0) {
       new import_obsidian5.Notice("Attention: cannot anchor a selection that crosses formatting.");
       return null;
@@ -664,10 +690,75 @@ var MarkdownHost = class {
   }
   /** How many identical strings precede this selection on screen. */
   renderedOrdinal(view, selection, selected) {
-    const range = selection.getRangeAt(0).cloneRange();
-    range.selectNodeContents(view.contentEl);
-    range.setEnd(selection.getRangeAt(0).startContainer, selection.getRangeAt(0).startOffset);
-    return countOccurrences(range.toString(), selected);
+    const sel = selection.getRangeAt(0);
+    const before = sel.cloneRange();
+    before.selectNodeContents(view.contentEl);
+    before.setEnd(sel.startContainer, sel.startOffset);
+    return countOccurrences(before.toString(), selected);
+  }
+  // ── Menu items ─────────────────────────────────────────────────────────────
+  addCreateItems(menu, file, anchor) {
+    menu.addItem(
+      (item) => item.setTitle("Highlight").setIcon("highlighter").setSection("attention").onClick(() => {
+        void this.create(file, anchor, this.settings.defaultColor, null);
+      })
+    );
+    menu.addItem(
+      (item) => item.setTitle("Highlight in colour\u2026").setIcon("palette").setSection("attention").onClick((e) => {
+        this.popover.showAt(rectOf(e), {
+          onHighlight: (color) => {
+            void this.create(file, anchor, color, null);
+          },
+          onComment: () => this.promptComment(file, anchor, "")
+        });
+      })
+    );
+    menu.addItem(
+      (item) => item.setTitle("Comment\u2026").setIcon("message-square").setSection("attention").onClick(() => this.promptComment(file, anchor, ""))
+    );
+  }
+  addExistingItems(menu, file, el) {
+    const id = el.dataset.atId;
+    if (!id)
+      return;
+    menu.addItem(
+      (item) => item.setTitle("Edit comment\u2026").setIcon("message-square").setSection("attention").onClick(() => {
+        void this.editComment(file, id);
+      })
+    );
+    menu.addItem(
+      (item) => item.setTitle("Change colour\u2026").setIcon("palette").setSection("attention").onClick(() => {
+        this.popover.showAt(el.getBoundingClientRect(), {
+          onHighlight: (color) => {
+            void this.store.update(file.path, id, { color });
+          },
+          onComment: () => {
+            void this.editComment(file, id);
+          }
+        });
+      })
+    );
+    menu.addItem(
+      (item) => item.setTitle("Remove highlight").setIcon("trash").setSection("attention").setWarning(true).onClick(() => {
+        void this.store.remove(file.path, id);
+      })
+    );
+  }
+  // ── Actions ────────────────────────────────────────────────────────────────
+  promptComment(file, anchor, initial) {
+    new CommentModal(this.app, anchor.quote, initial, (body) => {
+      void this.create(file, anchor, this.settings.defaultColor, body || null);
+    }).open();
+  }
+  async editComment(file, id) {
+    var _a;
+    const data = await this.store.get(file.path);
+    const annotation = data.annotations.find((a) => a.id === id);
+    if (!annotation)
+      return;
+    new CommentModal(this.app, annotation.anchor.quote, (_a = annotation.body) != null ? _a : "", (body) => {
+      void this.store.update(file.path, id, { body: body || null });
+    }).open();
   }
   async create(file, anchor, color, body) {
     const annotation = {
@@ -680,31 +771,12 @@ var MarkdownHost = class {
     };
     await this.store.add(file.path, annotation);
   }
-  async openExisting(file, el) {
-    const id = el.dataset.atId;
-    if (!id)
-      return;
-    const data = await this.store.get(file.path);
-    const annotation = data.annotations.find((a) => a.id === id);
-    if (!annotation)
-      return;
-    const rect = el.getBoundingClientRect();
-    this.popover.showAt(rect, {
-      onHighlight: (color) => {
-        void this.store.update(file.path, id, { color });
-      },
-      onComment: () => {
-        var _a;
-        new CommentModal(this.app, annotation.anchor.quote, (_a = annotation.body) != null ? _a : "", (body) => {
-          void this.store.update(file.path, id, { body: body || null });
-        }).open();
-      },
-      onRemove: () => {
-        void this.store.remove(file.path, id);
-      }
-    });
-  }
 };
+function rectOf(e) {
+  const x = e instanceof MouseEvent ? e.clientX : window.innerWidth / 2;
+  const y = e instanceof MouseEvent ? e.clientY : window.innerHeight / 2;
+  return new DOMRect(x, y, 0, 0);
+}
 
 // src/hosts/markdown/decorations.ts
 var import_view = require("@codemirror/view");
