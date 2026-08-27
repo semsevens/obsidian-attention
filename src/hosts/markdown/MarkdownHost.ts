@@ -149,7 +149,6 @@ export class MarkdownHost {
       item
         .setTitle('Highlight')
         .setIcon('highlighter')
-        .setSection('attention')
         .onClick(() => { void this.create(file, anchor, this.settings.defaultColor, null); }),
     );
 
@@ -157,7 +156,6 @@ export class MarkdownHost {
       item
         .setTitle('Highlight in colour…')
         .setIcon('palette')
-        .setSection('attention')
         // MenuItem has no submenu in the public API, so the swatches reuse the
         // popover — opened deliberately here rather than on every selection.
         .onClick(e => {
@@ -172,7 +170,6 @@ export class MarkdownHost {
       item
         .setTitle('Comment…')
         .setIcon('message-square')
-        .setSection('attention')
         .onClick(() => this.promptComment(file, anchor, '')),
     );
   }
@@ -185,7 +182,6 @@ export class MarkdownHost {
       item
         .setTitle('Edit comment…')
         .setIcon('message-square')
-        .setSection('attention')
         .onClick(() => { void this.editComment(file, id); }),
     );
 
@@ -193,7 +189,6 @@ export class MarkdownHost {
       item
         .setTitle('Change colour…')
         .setIcon('palette')
-        .setSection('attention')
         .onClick(() => {
           this.popover.showAt(el.getBoundingClientRect(), {
             onHighlight: color => { void this.store.update(file.path, id, { color }); },
@@ -206,7 +201,6 @@ export class MarkdownHost {
       item
         .setTitle('Remove highlight')
         .setIcon('trash')
-        .setSection('attention')
         .setWarning(true)
         .onClick(() => { void this.store.remove(file.path, id); }),
     );

@@ -699,12 +699,12 @@ var MarkdownHost = class {
   // ── Menu items ─────────────────────────────────────────────────────────────
   addCreateItems(menu, file, anchor) {
     menu.addItem(
-      (item) => item.setTitle("Highlight").setIcon("highlighter").setSection("attention").onClick(() => {
+      (item) => item.setTitle("Highlight").setIcon("highlighter").onClick(() => {
         void this.create(file, anchor, this.settings.defaultColor, null);
       })
     );
     menu.addItem(
-      (item) => item.setTitle("Highlight in colour\u2026").setIcon("palette").setSection("attention").onClick((e) => {
+      (item) => item.setTitle("Highlight in colour\u2026").setIcon("palette").onClick((e) => {
         this.popover.showAt(rectOf(e), {
           onHighlight: (color) => {
             void this.create(file, anchor, color, null);
@@ -714,7 +714,7 @@ var MarkdownHost = class {
       })
     );
     menu.addItem(
-      (item) => item.setTitle("Comment\u2026").setIcon("message-square").setSection("attention").onClick(() => this.promptComment(file, anchor, ""))
+      (item) => item.setTitle("Comment\u2026").setIcon("message-square").onClick(() => this.promptComment(file, anchor, ""))
     );
   }
   addExistingItems(menu, file, el) {
@@ -722,12 +722,12 @@ var MarkdownHost = class {
     if (!id)
       return;
     menu.addItem(
-      (item) => item.setTitle("Edit comment\u2026").setIcon("message-square").setSection("attention").onClick(() => {
+      (item) => item.setTitle("Edit comment\u2026").setIcon("message-square").onClick(() => {
         void this.editComment(file, id);
       })
     );
     menu.addItem(
-      (item) => item.setTitle("Change colour\u2026").setIcon("palette").setSection("attention").onClick(() => {
+      (item) => item.setTitle("Change colour\u2026").setIcon("palette").onClick(() => {
         this.popover.showAt(el.getBoundingClientRect(), {
           onHighlight: (color) => {
             void this.store.update(file.path, id, { color });
@@ -739,7 +739,7 @@ var MarkdownHost = class {
       })
     );
     menu.addItem(
-      (item) => item.setTitle("Remove highlight").setIcon("trash").setSection("attention").setWarning(true).onClick(() => {
+      (item) => item.setTitle("Remove highlight").setIcon("trash").setWarning(true).onClick(() => {
         void this.store.remove(file.path, id);
       })
     );
