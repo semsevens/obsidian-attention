@@ -2,6 +2,8 @@
 // so a throw during onload (which Obsidian swallows into a dead plugin)
 // shows up as a stack trace here.
 const Module = require('module');
+const path = require('path');
+const TARGET = path.resolve(process.cwd(), process.argv[2] || 'main.js');
 
 class Component {
   registerEvent() {} register() {} registerDomEvent() {} registerInterval() {}
@@ -87,13 +89,26 @@ Module._load = function (req, ...rest) {
 
 const workspace = Object.assign(new Events(), {
   onLayoutReady(cb) { LAYOUT_READY = cb; },
-  getLeavesOfType() { return []; },
-  getRightLeaf() { return { setViewState: async () => {}, view: null }; },
+  getLeavesOfType() { return LEAVES; },
+  getRightLeaf() { return makeLeaf(); },
   getActiveViewOfType() { return null; },
   getActiveFile() { return ACTIVE_FILE; },
   revealLeaf: async () => {}, setActiveLeaf() {}, getLeaf() { return {}; },
 });
 let LAYOUT_READY = null;
+const LEAVES = [];
+function makeLeaf() {
+  const leaf = {
+    view: null,
+    detach() { const i = LEAVES.indexOf(leaf); if (i >= 0) LEAVES.splice(i, 1); },
+    async setViewState(st) {
+      const f = VIEWS[st.type];
+      if (f) { leaf.view = f(leaf); await leaf.view.onOpen?.(); }
+    },
+  };
+  LEAVES.push(leaf);
+  return leaf;
+}
 let ACTIVE_FILE = null;
 
 const FILES = new Map();
@@ -111,7 +126,8 @@ const app = {
 global.__APP = app;
 
 (async () => {
-  const PluginClass = require(process.argv[2]).default ?? require(process.argv[2]);
+  const loaded = require(TARGET);
+  const PluginClass = loaded.default ?? loaded;
   const p = new PluginClass(app, { id: 'attention', version: '0.1.0' });
   console.log('▶ onload()...');
   await p.onload();

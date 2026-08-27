@@ -42,6 +42,7 @@ export class ReviewView extends ItemView {
   getIcon() { return 'highlighter'; }
 
   async onOpen() {
+    console.log('[attention] panel opened');
     this.registerEvent(this.app.workspace.on('file-open', () => { void this.render(); }));
     await this.render();
   }
@@ -49,6 +50,7 @@ export class ReviewView extends ItemView {
   /** Re-render. Safe to call from anywhere; it reads current state itself. */
   async render(): Promise<void> {
     const root = this.contentEl;
+    console.log('[attention] panel render, lens =', this.lens);
     root.empty();
     root.addClass('at-review');
 

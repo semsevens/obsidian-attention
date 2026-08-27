@@ -442,6 +442,7 @@ var ReviewView = class extends import_obsidian4.ItemView {
     return "highlighter";
   }
   async onOpen() {
+    console.log("[attention] panel opened");
     this.registerEvent(this.app.workspace.on("file-open", () => {
       void this.render();
     }));
@@ -450,6 +451,7 @@ var ReviewView = class extends import_obsidian4.ItemView {
   /** Re-render. Safe to call from anywhere; it reads current state itself. */
   async render() {
     const root = this.contentEl;
+    console.log("[attention] panel render, lens =", this.lens);
     root.empty();
     root.addClass("at-review");
     this.renderHeader(root);
@@ -1201,6 +1203,14 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
       void this.openReview();
     });
     this.addCommand({
+      id: "rebuild-panel",
+      name: "Rebuild attention panel",
+      callback: () => {
+        this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW).forEach((l) => l.detach());
+        void this.openReview();
+      }
+    });
+    this.addCommand({
       id: "open-review",
       name: "Open attention review",
       callback: () => {
@@ -1220,16 +1230,24 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
     document.body.toggleClass("at-style-background", this.settings.markStyle === "background");
   }
   async onLayoutReady() {
-    await this.reclaimStaleLeaves();
+    this.reclaimStaleLeaves();
     await this.rebuildIndex();
     await this.warmOpenFiles();
   }
-  /** Re-seat panels left holding a placeholder by a previous load of this plugin. */
-  async reclaimStaleLeaves() {
+  /**
+   * Discard panels left behind by a previous load of this plugin.
+   *
+   * setViewState on the stale leaf isn't enough — a leaf restored before the
+   * view type was registered, or orphaned by a reload, can stay wedged holding
+   * a placeholder. Detaching and letting it be recreated always works, and
+   * costs nothing: the panel holds no state worth preserving.
+   */
+  reclaimStaleLeaves() {
     for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW)) {
       if (leaf.view instanceof ReviewView)
         continue;
-      await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: false });
+      console.log("[attention] discarding a stale panel leaf");
+      leaf.detach();
     }
   }
   async warmOpenFiles() {
@@ -1291,6 +1309,16 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
       return;
     if (!(leaf.view instanceof ReviewView)) {
       await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: focus });
+    }
+    if (!(leaf.view instanceof ReviewView)) {
+      console.log("[attention] panel leaf would not take the view; recreating");
+      leaf.detach();
+      const fresh = this.app.workspace.getRightLeaf(false);
+      if (!fresh)
+        return;
+      await fresh.setViewState({ type: VIEW_TYPE_REVIEW, active: focus });
+      await this.app.workspace.revealLeaf(fresh);
+      return;
     }
     await this.app.workspace.revealLeaf(leaf);
     if (!focus) {
