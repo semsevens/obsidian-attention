@@ -141,6 +141,36 @@ this.contentEl.dispatchEvent(new CustomEvent('mt:transcript-rendered', {
 单向依赖：media-transcript 不知道本插件存在，只是往外喊一声；本插件监听后幂等重贴。
 没装 media-transcript 时该 adapter 自动跳过。
 
+## 开发与测试
+
+```bash
+npm run dev    # esbuild watch，每次构建后自动复制到 dev vault
+npm test       # vitest
+```
+
+**部署用复制，不用软链** —— 本 repo 在 iCloud Drive 上，把 vault 指向 iCloud 路径
+有 Obsidian 卡在被 evict 的文件上的风险。复制只要几毫秒，且 vault 保持自包含。
+目标目录由 `VAULT_PLUGIN_DIR` 覆盖，置空则跳过（CI 就是这么做的）。
+构建时会写一个 `.hotreload` 标记文件，装了 pjeby/hot-reload 就能存盘即重载。
+
+`styles.css` 不是 esbuild 的输入，所以单独 watch —— 改 CSS 不必去碰某个 .ts 文件
+才能触发部署。
+
+### 测什么、不测什么
+
+**测纯逻辑**：`store/paths.ts`（sidecar 命名与反查）和 `store/review.ts`（分桶与
+resurface 排序）。这两块决定「你标过的东西还能不能被找到、还会不会再出现」，
+而且**错了是静默的** —— 手工点击恰恰发现不了。所以它们被刻意剥离成不 import
+`obsidian` 的纯模块。
+
+其中一条测试直接把 media-transcript 的字幕正则写进断言，锁死「`.anno.json` 不会被
+误认成 marker 为 `anno` 的字幕轨」这个跨插件约束 —— 将来谁改 `SIDECAR_SUFFIX`，
+测试会先炸。
+
+**不测 UI 层**：宿主适配器和回顾面板是 DOM 胶水，单测收益低于维护成本，走手工。
+这跟 media-transcript 全盘不写测试的取舍一致 —— 区别只在于 Attention 有一块
+真正值得测的纯逻辑，而 media-transcript 几乎没有。
+
 ## 现状
 
 | 模块 | 状态 |
@@ -149,6 +179,8 @@ this.contentEl.dispatchEvent(new CustomEvent('mt:transcript-rendered', {
 | 重命名跟随、删除处理 | ✅ 可用（文件夹移动无需处理：sidecar 是兄弟，跟着走）|
 | 注意力索引 + 时间桶 + resurface | ✅ 可用 |
 | 回顾面板 | ✅ 骨架可用（列表、分组、点击跳转、标记已回顾）|
+| 单元测试 | ✅ 13 个，覆盖命名与回顾策略 |
+| dev vault 自动部署 | ✅ 构建即复制 |
 | `AnnotationHost` 接口 | ✅ 已定义 |
 | transcript 宿主 | ⬜ 待实现（含 media-transcript 侧的广播改动）|
 | markdown 宿主（阅读模式 + CM6 实时预览）| ⬜ 待实现 |

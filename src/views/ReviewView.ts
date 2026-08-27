@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile } from 'obsidian';
 import type AttentionPlugin from '../main';
-import { IndexEntry, Bucket } from '../store/attentionIndex';
+import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
 import { isComment } from '../model';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
@@ -46,7 +46,7 @@ export class ReviewView extends ItemView {
       return;
     }
 
-    for (const key of ['today', 'week', 'month', 'older'] as Bucket[]) {
+    for (const key of BUCKET_ORDER) {
       const entries = buckets[key];
       if (entries.length === 0) continue;
       root.createDiv('at-bucket-title').setText(`${BUCKET_LABELS[key]} · ${entries.length}`);

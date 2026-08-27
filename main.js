@@ -93,6 +93,23 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
   }
 };
 
+// src/store/paths.ts
+var SIDECAR_SUFFIX = ".anno.json";
+function sidecarPathFor(targetPath) {
+  return targetPath + SIDECAR_SUFFIX;
+}
+function isSidecarPath(path) {
+  return path.endsWith(SIDECAR_SUFFIX);
+}
+function targetPathFor(sidecarPath) {
+  if (!isSidecarPath(sidecarPath))
+    return null;
+  const target = sidecarPath.slice(0, -SIDECAR_SUFFIX.length);
+  if (target.length === 0 || isSidecarPath(target))
+    return null;
+  return target;
+}
+
 // src/store/sidecar.ts
 var import_obsidian2 = require("obsidian");
 
@@ -105,18 +122,6 @@ function isComment(a) {
 }
 
 // src/store/sidecar.ts
-var SIDECAR_SUFFIX = ".anno.json";
-function sidecarPathFor(targetPath) {
-  return targetPath + SIDECAR_SUFFIX;
-}
-function isSidecarPath(path) {
-  return path.endsWith(SIDECAR_SUFFIX);
-}
-function targetPathFor(sidecarPath) {
-  if (!isSidecarPath(sidecarPath))
-    return null;
-  return sidecarPath.slice(0, -SIDECAR_SUFFIX.length);
-}
 async function loadSidecar(app, targetPath) {
   const file = app.vault.getAbstractFileByPath(sidecarPathFor(targetPath));
   if (!(file instanceof import_obsidian2.TFile))
@@ -145,6 +150,38 @@ async function saveSidecar(app, data) {
     await app.vault.create(path, body);
 }
 
+// src/store/review.ts
+var BUCKET_ORDER = ["today", "week", "month", "older"];
+var DAY = 864e5;
+function bucketize(entries, now) {
+  const out = { today: [], week: [], month: [], older: [] };
+  for (const e of entries) {
+    const age = now - Date.parse(e.annotation.created);
+    if (age < DAY)
+      out.today.push(e);
+    else if (age < 7 * DAY)
+      out.week.push(e);
+    else if (age < 30 * DAY)
+      out.month.push(e);
+    else
+      out.older.push(e);
+  }
+  return out;
+}
+function pickResurface(entries, n, rand) {
+  const decorated = entries.map((entry) => ({ entry, jitter: rand() }));
+  decorated.sort((a, b) => {
+    const seen = a.entry.annotation.reviewed.length - b.entry.annotation.reviewed.length;
+    if (seen !== 0)
+      return seen;
+    return a.jitter - b.jitter;
+  });
+  return decorated.slice(0, Math.max(0, n)).map((d) => d.entry);
+}
+function byNewest(a, b) {
+  return b.annotation.created.localeCompare(a.annotation.created);
+}
+
 // src/store/attentionIndex.ts
 var AttentionIndex = class {
   constructor(app) {
@@ -165,7 +202,7 @@ var AttentionIndex = class {
         next.push({ targetPath, annotation });
       }
     }
-    next.sort((a, b) => b.annotation.created.localeCompare(a.annotation.created));
+    next.sort(byNewest);
     this.entries = next;
   }
   /** Replace one file's entries in place (after an edit, without a full scan). */
@@ -173,7 +210,7 @@ var AttentionIndex = class {
     this.entries = this.entries.filter((e) => e.targetPath !== targetPath);
     for (const annotation of annotations)
       this.entries.push({ targetPath, annotation });
-    this.entries.sort((a, b) => b.annotation.created.localeCompare(a.annotation.created));
+    this.entries.sort(byNewest);
   }
   /** Follow a rename so the index doesn't point at a path that's gone. */
   renameFile(oldPath, newPath) {
@@ -185,39 +222,11 @@ var AttentionIndex = class {
   all() {
     return this.entries;
   }
-  /**
-   * Group by age. Deliberately *not* a spaced-repetition schedule: the goal is
-   * to run into these again, not to memorise them, so there's nothing to grade
-   * and no interval to compute.
-   */
   buckets(now = Date.now()) {
-    const DAY = 864e5;
-    const out = { today: [], week: [], month: [], older: [] };
-    for (const e of this.entries) {
-      const age = now - Date.parse(e.annotation.created);
-      if (age < DAY)
-        out.today.push(e);
-      else if (age < 7 * DAY)
-        out.week.push(e);
-      else if (age < 30 * DAY)
-        out.month.push(e);
-      else
-        out.older.push(e);
-    }
-    return out;
+    return bucketize(this.entries, now);
   }
-  /**
-   * `n` entries to resurface, biased towards things you haven't seen since you
-   * marked them. Caller supplies the randomness so this stays testable.
-   */
   resurface(n, rand) {
-    const pool = [...this.entries].sort((a, b) => {
-      const seen = a.annotation.reviewed.length - b.annotation.reviewed.length;
-      if (seen !== 0)
-        return seen;
-      return rand() - 0.5;
-    });
-    return pool.slice(0, n);
+    return pickResurface(this.entries, n, rand);
   }
 };
 
@@ -263,7 +272,7 @@ var ReviewView = class extends import_obsidian3.ItemView {
       );
       return;
     }
-    for (const key of ["today", "week", "month", "older"]) {
+    for (const key of BUCKET_ORDER) {
       const entries = buckets[key];
       if (entries.length === 0)
         continue;

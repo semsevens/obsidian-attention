@@ -1,6 +1,10 @@
 import { App } from 'obsidian';
 import { Annotation } from '../model';
-import { isSidecarPath, targetPathFor, loadSidecar } from './sidecar';
+import { isSidecarPath, targetPathFor } from './paths';
+import { loadSidecar } from './sidecar';
+import { IndexEntry, Bucket, bucketize, pickResurface, byNewest } from './review';
+
+export type { IndexEntry, Bucket };
 
 /**
  * A flat, time-ordered view over every annotation in the vault.
@@ -9,16 +13,9 @@ import { isSidecarPath, targetPathFor, loadSidecar } from './sidecar';
  * asks questions organised by *time* ("what did I mark this week?"). Rather
  * than distort the storage format for the query, we keep a derived index.
  *
- * It is deliberately disposable: it lives in the plugin's own data folder, is
- * never synced, and can be thrown away and rebuilt by rescanning the vault.
+ * It is deliberately disposable: it is never synced, and can be thrown away and
+ * rebuilt by rescanning the vault.
  */
-export interface IndexEntry {
-  targetPath: string;
-  annotation: Annotation;
-}
-
-export type Bucket = 'today' | 'week' | 'month' | 'older';
-
 export class AttentionIndex {
   private entries: IndexEntry[] = [];
 
@@ -36,7 +33,7 @@ export class AttentionIndex {
         next.push({ targetPath, annotation });
       }
     }
-    next.sort((a, b) => b.annotation.created.localeCompare(a.annotation.created));
+    next.sort(byNewest);
     this.entries = next;
   }
 
@@ -44,7 +41,7 @@ export class AttentionIndex {
   replaceFile(targetPath: string, annotations: Annotation[]): void {
     this.entries = this.entries.filter(e => e.targetPath !== targetPath);
     for (const annotation of annotations) this.entries.push({ targetPath, annotation });
-    this.entries.sort((a, b) => b.annotation.created.localeCompare(a.annotation.created));
+    this.entries.sort(byNewest);
   }
 
   /** Follow a rename so the index doesn't point at a path that's gone. */
@@ -58,34 +55,11 @@ export class AttentionIndex {
     return this.entries;
   }
 
-  /**
-   * Group by age. Deliberately *not* a spaced-repetition schedule: the goal is
-   * to run into these again, not to memorise them, so there's nothing to grade
-   * and no interval to compute.
-   */
   buckets(now = Date.now()): Record<Bucket, IndexEntry[]> {
-    const DAY = 86_400_000;
-    const out: Record<Bucket, IndexEntry[]> = { today: [], week: [], month: [], older: [] };
-    for (const e of this.entries) {
-      const age = now - Date.parse(e.annotation.created);
-      if (age < DAY) out.today.push(e);
-      else if (age < 7 * DAY) out.week.push(e);
-      else if (age < 30 * DAY) out.month.push(e);
-      else out.older.push(e);
-    }
-    return out;
+    return bucketize(this.entries, now);
   }
 
-  /**
-   * `n` entries to resurface, biased towards things you haven't seen since you
-   * marked them. Caller supplies the randomness so this stays testable.
-   */
   resurface(n: number, rand: () => number): IndexEntry[] {
-    const pool = [...this.entries].sort((a, b) => {
-      const seen = a.annotation.reviewed.length - b.annotation.reviewed.length;
-      if (seen !== 0) return seen;
-      return rand() - 0.5;
-    });
-    return pool.slice(0, n);
+    return pickResurface(this.entries, n, rand);
   }
 }

@@ -1,32 +1,10 @@
 import { App, TFile } from 'obsidian';
 import { AnnotationFile, emptyFile } from '../model';
+import { sidecarPathFor } from './paths';
 
-// Sidecar naming: the target's FULL filename (extension included) plus a fixed
-// suffix.
-//
-//   lecture.mp4  →  lecture.mp4.anno.json
-//   lecture.m4a  →  lecture.m4a.anno.json     (distinct from the .mp4's)
-//   周报.md       →  周报.md.anno.json
-//
-// Keeping the original extension buys two things: media that exists in several
-// formats gets one sidecar each, and reverse lookup is a plain suffix strip
-// rather than the "try every dotted prefix" guessing that a marker-style
-// convention forces (see obsidian-media-transcript's findMediaForSubtitle).
-export const SIDECAR_SUFFIX = '.anno.json';
-
-export function sidecarPathFor(targetPath: string): string {
-  return targetPath + SIDECAR_SUFFIX;
-}
-
-export function isSidecarPath(path: string): boolean {
-  return path.endsWith(SIDECAR_SUFFIX);
-}
-
-/** Inverse of sidecarPathFor. Returns null if this isn't a sidecar path. */
-export function targetPathFor(sidecarPath: string): string | null {
-  if (!isSidecarPath(sidecarPath)) return null;
-  return sidecarPath.slice(0, -SIDECAR_SUFFIX.length);
-}
+// Path rules live in ./paths (no `obsidian` import, so they're unit-testable).
+// Re-exported here so callers have one place to import the store from.
+export * from './paths';
 
 /** Read the sidecar for `targetPath`. Missing or corrupt → an empty file. */
 export async function loadSidecar(

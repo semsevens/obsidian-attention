@@ -1,6 +1,7 @@
 import { Plugin, TFile, TAbstractFile, WorkspaceLeaf, Notice } from 'obsidian';
 import { AttentionSettings, DEFAULT_SETTINGS, AttentionSettingTab } from './settings';
-import { AttentionIndex, IndexEntry } from './store/attentionIndex';
+import { AttentionIndex } from './store/attentionIndex';
+import { IndexEntry } from './store/review';
 import { ReviewView, VIEW_TYPE_REVIEW } from './views/ReviewView';
 import {
   loadSidecar,

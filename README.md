@@ -52,3 +52,31 @@ cp main.js manifest.json styles.css <vault>/.obsidian/plugins/attention/
 ## License
 
 MIT
+
+## Development
+
+```bash
+npm install
+npm run dev      # esbuild watch — rebuilds and copies into the dev vault on every save
+npm test         # vitest, watch with: npm run test:watch
+```
+
+`npm run dev` copies `main.js`, `manifest.json` and `styles.css` into
+`~/Desktop/ob/me/.obsidian/plugins/attention/` after every rebuild (`styles.css` is
+watched separately, so CSS-only edits deploy too). Point it elsewhere with
+`VAULT_PLUGIN_DIR=/path/to/vault/.obsidian/plugins/attention`, or set it empty to
+skip deploying.
+
+Copy, not symlink — this repo lives in iCloud Drive, and aiming a vault at an iCloud
+path risks Obsidian stalling on an evicted file.
+
+Install [hot-reload](https://github.com/pjeby/hot-reload) in the dev vault and
+Obsidian will reload the plugin on every rebuild; the build already writes the
+`.hotreload` marker it looks for. Without it, reload manually.
+
+### What is tested
+
+The pure logic — sidecar path rules and the review policy. Both decide whether a
+passage you marked can still be found and shown to you again, and both fail
+*silently* when wrong, which is exactly what clicking around does not catch. The UI
+layers are left to manual testing.
