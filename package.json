@@ -8,7 +8,8 @@
     "build": "tsc --noEmit --skipLibCheck && vitest run && node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit --skipLibCheck",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke": "node scripts/smoke.cjs main.js"
   },
   "author": "semsevens",
   "license": "MIT",

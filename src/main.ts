@@ -74,11 +74,20 @@ export default class AttentionPlugin extends Plugin {
   }
 
   private async onLayoutReady(): Promise<void> {
+    await this.reclaimStaleLeaves();
     await this.rebuildIndex();
     // Notes open at load time never fire `file-open`, so without this their
     // highlights stay unpainted until you switch away and back — which is
     // exactly what happens on every hot reload.
     await this.warmOpenFiles();
+  }
+
+  /** Re-seat panels left holding a placeholder by a previous load of this plugin. */
+  private async reclaimStaleLeaves(): Promise<void> {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW)) {
+      if (leaf.view instanceof ReviewView) continue;
+      await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: false });
+    }
   }
 
   private async warmOpenFiles(): Promise<void> {
@@ -145,7 +154,12 @@ export default class AttentionPlugin extends Plugin {
       existing[0] ?? this.app.workspace.getRightLeaf(false);
     if (!leaf) return;
 
-    if (existing.length === 0) {
+    // Check what the leaf actually holds, not merely that one exists. A leaf
+    // whose plugin has been unloaded and reloaded — every hot reload, and any
+    // sidebar tab Obsidian has deferred — is still returned by
+    // getLeavesOfType() while holding a placeholder rather than our view, and
+    // revealing that shows an empty pane.
+    if (!(leaf.view instanceof ReviewView)) {
       await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: focus });
     }
     await this.app.workspace.revealLeaf(leaf);

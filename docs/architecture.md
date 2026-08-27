@@ -236,6 +236,19 @@ npm test       # vitest
 `styles.css` 不是 esbuild 的输入，所以单独 watch —— 改 CSS 不必去碰某个 .ts 文件
 才能触发部署。
 
+### 冒烟测试（`npm run smoke`）
+
+`scripts/smoke.cjs` 用 stub 顶掉 `obsidian` 和 `@codemirror/*`，在 Node 里
+**把构建产物真正加载起来**，跑 `onload()` → `onLayoutReady()` → 构造 ReviewView
+→ `onOpen()` → 点 ribbon，并把渲染出的 DOM 树打印出来。
+
+存在的理由很具体：**Obsidian 会把插件加载期的异常吞掉**，表现就是「插件装了但什么
+都不发生」，控制台里也未必醒目。单测覆盖不到 `onload` 这条装配路径，而它恰恰是
+最容易因为一次改名或一个 undefined 就整个死掉的地方。
+
+它不能替代手测（没有真实 DOM、没有 CodeMirror），但能在三秒内回答
+「是代码坏了还是环境坏了」——这个问题手工排查一次要十几分钟。
+
 ### 测什么、不测什么
 
 **测纯逻辑**：`store/paths.ts`（sidecar 命名与反查）和 `store/review.ts`（分桶与

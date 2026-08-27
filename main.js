@@ -1220,8 +1220,17 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
     document.body.toggleClass("at-style-background", this.settings.markStyle === "background");
   }
   async onLayoutReady() {
+    await this.reclaimStaleLeaves();
     await this.rebuildIndex();
     await this.warmOpenFiles();
+  }
+  /** Re-seat panels left holding a placeholder by a previous load of this plugin. */
+  async reclaimStaleLeaves() {
+    for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_REVIEW)) {
+      if (leaf.view instanceof ReviewView)
+        continue;
+      await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: false });
+    }
   }
   async warmOpenFiles() {
     const paths = /* @__PURE__ */ new Set();
@@ -1280,7 +1289,7 @@ var AttentionPlugin = class extends import_obsidian8.Plugin {
     const leaf = (_a = existing[0]) != null ? _a : this.app.workspace.getRightLeaf(false);
     if (!leaf)
       return;
-    if (existing.length === 0) {
+    if (!(leaf.view instanceof ReviewView)) {
       await leaf.setViewState({ type: VIEW_TYPE_REVIEW, active: focus });
     }
     await this.app.workspace.revealLeaf(leaf);
