@@ -27,13 +27,33 @@ __export(main_exports, {
   default: () => AttentionPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian9 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 
 // src/settings.ts
+var import_obsidian2 = require("obsidian");
+
+// src/ui/time.ts
 var import_obsidian = require("obsidian");
+var asMoment = import_obsidian.moment;
+function formatWhen(iso, format = "", now) {
+  const m = asMoment(iso);
+  if (!m.isValid())
+    return iso;
+  if (format.trim().length > 0)
+    return m.format(format);
+  return now === void 0 ? m.fromNow() : m.from(asMoment(now));
+}
+var TIME_FORMAT_EXAMPLES = [
+  "YYYY-MM-DD HH:mm:ss",
+  "YYYY-MM-DD HH:mm",
+  "YYYY-MM-DD"
+];
+
+// src/settings.ts
 var DEFAULT_SETTINGS = {
   markColor: "#f5c542",
   markStyle: "underline",
+  timeFormat: "YYYY-MM-DD HH:mm:ss",
   popoverOnSelection: true,
   enableMarkdownHost: true,
   enableTranscriptHost: true,
@@ -42,7 +62,7 @@ var DEFAULT_SETTINGS = {
   resurfaceCount: 10,
   keepOrphanedSidecars: true
 };
-var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
+var AttentionSettingTab = class extends import_obsidian2.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -50,22 +70,38 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    new import_obsidian.Setting(containerEl).setName("Appearance").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Mark colour").setDesc("Marks share one colour. A passage marked more than once is drawn more strongly.").addColorPicker(
+    new import_obsidian2.Setting(containerEl).setName("Appearance").setHeading();
+    new import_obsidian2.Setting(containerEl).setName("Mark colour").setDesc("Marks share one colour. A passage marked more than once is drawn more strongly.").addColorPicker(
       (c) => c.setValue(this.plugin.settings.markColor).onChange(async (v) => {
         this.plugin.settings.markColor = v;
         await this.plugin.saveSettings();
         this.plugin.applyMarkColor();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Where to annotate").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Markdown notes").setDesc("Highlight and comment inside notes. The note itself is never modified.").addToggle(
+    const sample = new Date().toISOString();
+    const timeSetting = new import_obsidian2.Setting(containerEl).setName("Time format").addText(
+      (t) => t.setPlaceholder("empty = relative").setValue(this.plugin.settings.timeFormat).onChange(async (v) => {
+        this.plugin.settings.timeFormat = v.trim();
+        await this.plugin.saveSettings();
+        describeTime();
+        this.plugin.refreshPanels();
+      })
+    );
+    const describeTime = () => {
+      const f = this.plugin.settings.timeFormat;
+      timeSetting.setDesc(
+        `Shown as: ${formatWhen(sample, f)}. ` + (f ? `A moment format string \u2014 the same vocabulary as daily note filenames. Clear it for relative times ("3 days ago"), in your Obsidian's language.` : `Relative, and in your Obsidian's language. For an exact time, try ${TIME_FORMAT_EXAMPLES.join(" / ")}.`)
+      );
+    };
+    describeTime();
+    new import_obsidian2.Setting(containerEl).setName("Where to annotate").setHeading();
+    new import_obsidian2.Setting(containerEl).setName("Markdown notes").setDesc("Highlight and comment inside notes. The note itself is never modified.").addToggle(
       (t) => t.setValue(this.plugin.settings.enableMarkdownHost).onChange(async (v) => {
         this.plugin.settings.enableMarkdownHost = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Transcripts").setDesc(
+    new import_obsidian2.Setting(containerEl).setName("Transcripts").setDesc(
       "Highlight and comment on transcript lines in the Media Transcript plugin. Has no effect if that plugin is not installed."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.enableTranscriptHost).onChange(async (v) => {
@@ -73,7 +109,7 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Mark style").setDesc(
+    new import_obsidian2.Setting(containerEl).setName("Mark style").setDesc(
       "How highlights are drawn. Underline keeps a heavily-marked note readable and is easy to tell apart from Obsidian's own ==highlight== syntax. Annotations carrying a comment always get a little more weight."
     ).addDropdown(
       (d) => d.addOption("underline", "Underline").addOption("background", "Background").setValue(this.plugin.settings.markStyle).onChange(async (v) => {
@@ -82,7 +118,7 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
         this.plugin.applyMarkStyle();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Show swatches on selection").setDesc(
+    new import_obsidian2.Setting(containerEl).setName("Show swatches on selection").setDesc(
       "Pop up the colour swatches as soon as you select text. Turn this off to capture only from the right-click menu, which stays available either way."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.popoverOnSelection).onChange(async (v) => {
@@ -90,8 +126,8 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Review").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Open the panel for annotated notes").setDesc(
+    new import_obsidian2.Setting(containerEl).setName("Review").setHeading();
+    new import_obsidian2.Setting(containerEl).setName("Open the panel for annotated notes").setDesc(
       "Reveal the Attention panel when you open a note that has annotations, and leave it alone otherwise. Focus stays in the note either way."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.autoRevealPanel).onChange(async (v) => {
@@ -99,14 +135,14 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Resurface count").setDesc("How many annotations to bring back at a time, preferring ones you have not revisited.").addSlider(
+    new import_obsidian2.Setting(containerEl).setName("Resurface count").setDesc("How many annotations to bring back at a time, preferring ones you have not revisited.").addSlider(
       (s) => s.setLimits(3, 50, 1).setValue(this.plugin.settings.resurfaceCount).onChange(async (v) => {
         this.plugin.settings.resurfaceCount = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Advanced").setHeading();
-    new import_obsidian.Setting(containerEl).setName("Count replays").setDesc(
+    new import_obsidian2.Setting(containerEl).setName("Advanced").setHeading();
+    new import_obsidian2.Setting(containerEl).setName("Count replays").setDesc(
       "Record how often you replay a transcript segment. A weaker signal than a highlight, but a much denser one \u2014 useful for spotting what actually held your attention."
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.trackReplays).onChange(async (v) => {
@@ -114,13 +150,13 @@ var AttentionSettingTab = class extends import_obsidian.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Keep annotations when a file is deleted").setDesc("Leaves the .anno.json behind so annotations survive an accidental delete.").addToggle(
+    new import_obsidian2.Setting(containerEl).setName("Keep annotations when a file is deleted").setDesc("Leaves the .anno.json behind so annotations survive an accidental delete.").addToggle(
       (t) => t.setValue(this.plugin.settings.keepOrphanedSidecars).onChange(async (v) => {
         this.plugin.settings.keepOrphanedSidecars = v;
         await this.plugin.saveSettings();
       })
     );
-    new import_obsidian.Setting(containerEl).setName("Rebuild index").setDesc("Rescan every sidecar in the vault. Safe to run any time \u2014 the index is derived data.").addButton(
+    new import_obsidian2.Setting(containerEl).setName("Rebuild index").setDesc("Rescan every sidecar in the vault. Safe to run any time \u2014 the index is derived data.").addButton(
       (b) => b.setButtonText("Rebuild").onClick(async () => {
         await this.plugin.rebuildIndex();
       })
@@ -146,7 +182,7 @@ function targetPathFor(sidecarPath) {
 }
 
 // src/store/sidecar.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // src/model.ts
 function lastMarked(a) {
@@ -186,7 +222,7 @@ function sameSpot(a, b) {
 // src/store/sidecar.ts
 async function loadSidecar(app, targetPath) {
   const file = app.vault.getAbstractFileByPath(sidecarPathFor(targetPath));
-  if (!(file instanceof import_obsidian2.TFile))
+  if (!(file instanceof import_obsidian3.TFile))
     return emptyFile(targetPath);
   try {
     const parsed = JSON.parse(await app.vault.read(file));
@@ -202,12 +238,12 @@ async function saveSidecar(app, data) {
   const path = sidecarPathFor(data.target);
   const existing = app.vault.getAbstractFileByPath(path);
   if (data.annotations.length === 0) {
-    if (existing instanceof import_obsidian2.TFile)
+    if (existing instanceof import_obsidian3.TFile)
       await app.fileManager.trashFile(existing);
     return;
   }
   const body = JSON.stringify(data, null, 2);
-  if (existing instanceof import_obsidian2.TFile)
+  if (existing instanceof import_obsidian3.TFile)
     await app.vault.modify(existing, body);
   else
     await app.vault.create(path, body);
@@ -294,7 +330,7 @@ var AttentionIndex = class {
 };
 
 // src/views/ReviewView.ts
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // src/anchor/textQuote.ts
 var CONTEXT_LEN = 32;
@@ -411,7 +447,7 @@ async function inDocumentOrder(app, file, annotations) {
 }
 
 // src/hosts/markdown/reveal.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 async function reveal(app, file, annotation) {
   if (annotation.anchor.kind === "transcript") {
     await revealInTranscript(app, file, annotation);
@@ -449,7 +485,7 @@ async function revealInMarkdown(app, file, annotation) {
   const leaf = app.workspace.getLeaf(false);
   await leaf.openFile(file);
   const view = leaf.view;
-  if (!(view instanceof import_obsidian3.MarkdownView))
+  if (!(view instanceof import_obsidian4.MarkdownView))
     return;
   if (view.getMode() === "source") {
     if (annotation.anchor.kind !== "markdown")
@@ -482,81 +518,6 @@ function flash(el) {
   window.setTimeout(() => el.removeClass("at-flash"), 1300);
 }
 
-// src/ui/CommentBubble.ts
-var CommentBubble = class {
-  constructor() {
-    this.el = null;
-    this.dismiss = (e) => {
-      var _a;
-      if (e.target instanceof Node && ((_a = this.el) == null ? void 0 : _a.contains(e.target)))
-        return;
-      this.hide();
-    };
-  }
-  showFor(rect, annotation, actions) {
-    this.hide();
-    const el = document.createElement("div");
-    el.className = "at-bubble";
-    const body = annotation.body;
-    if (body && body.trim().length > 0)
-      el.createDiv("at-bubble-body").setText(body);
-    else
-      el.createDiv("at-bubble-empty").setText("No comment yet.");
-    const hits = annotation.hits;
-    const times = el.createDiv("at-bubble-hits");
-    times.createSpan({ cls: "at-hit-count", text: hits.length === 1 ? "Marked once" : `Marked ${hits.length}\xD7` });
-    for (const at of [...hits].reverse()) {
-      times.createDiv("at-hit-time").setText(formatWhen(at));
-    }
-    const row = el.createDiv("at-bubble-actions");
-    const add = (label, fn, warn = false) => {
-      const b = row.createEl("button", { cls: "at-pop-btn", text: label });
-      if (warn)
-        b.addClass("mod-warning");
-      b.addEventListener("click", () => {
-        fn();
-        this.hide();
-      });
-    };
-    add(body ? "Edit" : "Comment", actions.onEdit);
-    add("Mark again", actions.onMarkAgain);
-    add("Remove", actions.onRemove, true);
-    document.body.appendChild(el);
-    this.el = el;
-    const { width, height } = el.getBoundingClientRect();
-    const left = Math.min(
-      Math.max(8, rect.left + rect.width / 2 - width / 2),
-      window.innerWidth - width - 8
-    );
-    const above = rect.top - height - 8;
-    el.style.left = `${left}px`;
-    el.style.top = `${above < 8 ? rect.bottom + 8 : above}px`;
-    window.setTimeout(() => {
-      document.addEventListener("mousedown", this.dismiss);
-      document.addEventListener("keydown", this.dismiss);
-    }, 0);
-  }
-  hide() {
-    var _a;
-    document.removeEventListener("mousedown", this.dismiss);
-    document.removeEventListener("keydown", this.dismiss);
-    (_a = this.el) == null ? void 0 : _a.remove();
-    this.el = null;
-  }
-};
-function formatWhen(iso, now = Date.now()) {
-  const days = Math.floor((now - Date.parse(iso)) / 864e5);
-  if (!Number.isFinite(days))
-    return iso;
-  if (days <= 0)
-    return "today";
-  if (days === 1)
-    return "yesterday";
-  if (days < 30)
-    return `${days} days ago`;
-  return new Date(iso).toISOString().slice(0, 10);
-}
-
 // src/views/ReviewView.ts
 var VIEW_TYPE_REVIEW = "attention-review";
 var BUCKET_LABELS = {
@@ -565,7 +526,7 @@ var BUCKET_LABELS = {
   month: "This month",
   older: "Earlier"
 };
-var ReviewView = class extends import_obsidian4.ItemView {
+var ReviewView = class extends import_obsidian5.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
@@ -690,7 +651,7 @@ var ReviewView = class extends import_obsidian4.ItemView {
     if (annotation.anchor.kind === "transcript") {
       meta.createSpan({ text: fmtTime(annotation.anchor.start), cls: "at-time" });
     }
-    meta.createSpan({ text: formatWhen(lastMarked(annotation)), cls: "at-when" });
+    meta.createSpan({ text: formatWhen(lastMarked(annotation), this.plugin.settings.timeFormat), cls: "at-when" });
     if (annotation.hits.length > 1) {
       meta.createSpan({ text: `${annotation.hits.length}\xD7`, cls: "at-hits" });
     }
@@ -703,7 +664,7 @@ var ReviewView = class extends import_obsidian4.ItemView {
   // a panel that renders correctly into an element that is not in the document.
   async jumpTo(annotation, targetPath) {
     const file = this.app.vault.getAbstractFileByPath(targetPath);
-    if (!(file instanceof import_obsidian4.TFile))
+    if (!(file instanceof import_obsidian5.TFile))
       return;
     await reveal(this.app, file, annotation);
     await this.plugin.markReviewed({ targetPath, annotation });
@@ -837,7 +798,7 @@ ${body}` : body;
 };
 
 // src/hosts/markdown/MarkdownHost.ts
-var import_obsidian6 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 
 // src/ui/SelectionPopover.ts
 var SelectionPopover = class {
@@ -887,9 +848,73 @@ var SelectionPopover = class {
   }
 };
 
+// src/ui/CommentBubble.ts
+var CommentBubble = class {
+  constructor(timeFormat = "") {
+    this.timeFormat = timeFormat;
+    this.el = null;
+    this.dismiss = (e) => {
+      var _a;
+      if (e.target instanceof Node && ((_a = this.el) == null ? void 0 : _a.contains(e.target)))
+        return;
+      this.hide();
+    };
+  }
+  showFor(rect, annotation, actions) {
+    this.hide();
+    const el = document.createElement("div");
+    el.className = "at-bubble";
+    const body = annotation.body;
+    if (body && body.trim().length > 0)
+      el.createDiv("at-bubble-body").setText(body);
+    else
+      el.createDiv("at-bubble-empty").setText("No comment yet.");
+    const hits = annotation.hits;
+    const times = el.createDiv("at-bubble-hits");
+    times.createSpan({ cls: "at-hit-count", text: hits.length === 1 ? "Marked once" : `Marked ${hits.length}\xD7` });
+    for (const at of [...hits].reverse()) {
+      times.createDiv("at-hit-time").setText(formatWhen(at, this.timeFormat));
+    }
+    const row = el.createDiv("at-bubble-actions");
+    const add = (label, fn, warn = false) => {
+      const b = row.createEl("button", { cls: "at-pop-btn", text: label });
+      if (warn)
+        b.addClass("mod-warning");
+      b.addEventListener("click", () => {
+        fn();
+        this.hide();
+      });
+    };
+    add(body ? "Edit" : "Comment", actions.onEdit);
+    add("Mark again", actions.onMarkAgain);
+    add("Remove", actions.onRemove, true);
+    document.body.appendChild(el);
+    this.el = el;
+    const { width, height } = el.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(8, rect.left + rect.width / 2 - width / 2),
+      window.innerWidth - width - 8
+    );
+    const above = rect.top - height - 8;
+    el.style.left = `${left}px`;
+    el.style.top = `${above < 8 ? rect.bottom + 8 : above}px`;
+    window.setTimeout(() => {
+      document.addEventListener("mousedown", this.dismiss);
+      document.addEventListener("keydown", this.dismiss);
+    }, 0);
+  }
+  hide() {
+    var _a;
+    document.removeEventListener("mousedown", this.dismiss);
+    document.removeEventListener("keydown", this.dismiss);
+    (_a = this.el) == null ? void 0 : _a.remove();
+    this.el = null;
+  }
+};
+
 // src/ui/CommentModal.ts
-var import_obsidian5 = require("obsidian");
-var CommentModal = class extends import_obsidian5.Modal {
+var import_obsidian6 = require("obsidian");
+var CommentModal = class extends import_obsidian6.Modal {
   constructor(app, quote, initial, onSubmit) {
     super(app);
     this.quote = quote;
@@ -912,7 +937,7 @@ var CommentModal = class extends import_obsidian5.Modal {
         this.submit();
       }
     });
-    new import_obsidian5.Setting(contentEl).addButton(
+    new import_obsidian6.Setting(contentEl).addButton(
       (b) => b.setButtonText("Save").setCta().onClick(() => this.submit())
     );
     window.setTimeout(() => input.focus(), 0);
@@ -933,10 +958,10 @@ var MarkdownHost = class {
     this.plugin = plugin;
     this.store = store;
     this.settings = settings;
-    this.bubble = new CommentBubble();
     /** The element right-clicked, captured before any menu is built. */
     this.lastTarget = null;
     this.popover = new SelectionPopover();
+    this.bubble = new CommentBubble(settings.timeFormat);
   }
   register() {
     this.plugin.registerDomEvent(
@@ -968,12 +993,12 @@ var MarkdownHost = class {
         return;
       if (((_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim().length) != null ? _b : 0) > 0)
         return;
-      const file = (_c = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView)) == null ? void 0 : _c.file;
+      const file = (_c = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView)) == null ? void 0 : _c.file;
       if (file)
         void this.showBubble(file, hit);
     });
     this.plugin.registerDomEvent(document, "contextmenu", (e) => {
-      const view = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
+      const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
       if (!(view == null ? void 0 : view.file) || view.getMode() !== "preview")
         return;
       if (!this.hasSomethingToOffer(view))
@@ -1028,7 +1053,7 @@ var MarkdownHost = class {
   }
   /** Selection finished: offer the swatches straight away, if asked to. */
   async onSelectionMade() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian6.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
     const file = view == null ? void 0 : view.file;
     if (!view || !file)
       return;
@@ -1069,7 +1094,7 @@ var MarkdownHost = class {
     const file = view.file;
     if (!file)
       return;
-    const menu = new import_obsidian6.Menu();
+    const menu = new import_obsidian7.Menu();
     const existing = (_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl");
     if (existing instanceof HTMLElement) {
       this.addExistingItems(menu, file, existing);
@@ -1091,7 +1116,7 @@ var MarkdownHost = class {
     const source = await this.app.vault.cachedRead(file);
     const at = nthOccurrence(source, selected, this.renderedOrdinal(view, selection, selected));
     if (at < 0) {
-      new import_obsidian6.Notice("Attention: cannot anchor a selection that crosses formatting.");
+      new import_obsidian7.Notice("Attention: cannot anchor a selection that crosses formatting.");
       return null;
     }
     return { kind: "markdown", ...describe(source, at, at + selected.length) };
@@ -1149,18 +1174,18 @@ var MarkdownHost = class {
   async mark(file, anchor, body) {
     const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
     if (repeat)
-      new import_obsidian6.Notice(`Marked ${annotation.hits.length}\xD7 now`);
+      new import_obsidian7.Notice(`Marked ${annotation.hits.length}\xD7 now`);
   }
 };
 
 // src/hosts/markdown/decorations.ts
 var import_view = require("@codemirror/view");
 var import_state = require("@codemirror/state");
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 var refreshAnnotations = import_state.StateEffect.define();
 function build(view, provider) {
   var _a, _b;
-  const path = (_b = (_a = view.state.field(import_obsidian7.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+  const path = (_b = (_a = view.state.field(import_obsidian8.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
   if (!path)
     return import_view.Decoration.none;
   const annotations = provider(path);
@@ -1204,7 +1229,7 @@ function annotationDecorations(provider) {
 function repaintEditors(app) {
   app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
     const view = leaf.view;
-    if (!(view instanceof import_obsidian7.MarkdownView))
+    if (!(view instanceof import_obsidian8.MarkdownView))
       return;
     const cm = view.editor.cm;
     cm == null ? void 0 : cm.dispatch({ effects: refreshAnnotations.of() });
@@ -1255,7 +1280,7 @@ function readingModeHighlighter(provider) {
 }
 
 // src/hosts/transcript/TranscriptHost.ts
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/anchor/transcriptAnchor.ts
 var TIME_TOLERANCE_S = 3;
@@ -1339,8 +1364,8 @@ var TranscriptHost = class {
     this.plugin = plugin;
     this.store = store;
     this.settings = settings;
-    this.bubble = new CommentBubble();
     this.popover = new SelectionPopover();
+    this.bubble = new CommentBubble(settings.timeFormat);
   }
   register() {
     const onRendered = (e) => {
@@ -1481,7 +1506,7 @@ var TranscriptHost = class {
     const text = txt.innerText;
     const at = text.indexOf(selected);
     if (at < 0) {
-      new import_obsidian8.Notice("Attention: select within a single transcript line.");
+      new import_obsidian9.Notice("Attention: select within a single transcript line.");
       return null;
     }
     const seg = {
@@ -1514,7 +1539,7 @@ var TranscriptHost = class {
   }
   async showMenu(e, hit) {
     var _a;
-    const menu = new import_obsidian8.Menu();
+    const menu = new import_obsidian9.Menu();
     if (hit) {
       const mediaPath = (_a = this.panelOf(hit)) == null ? void 0 : _a.mediaPath;
       const id = hit.dataset.atId;
@@ -1577,12 +1602,12 @@ var TranscriptHost = class {
   async mark(mediaPath, anchor, body) {
     const { repeat, annotation } = await this.store.mark(mediaPath, anchor, body);
     if (repeat)
-      new import_obsidian8.Notice(`Marked ${annotation.hits.length}\xD7 now`);
+      new import_obsidian9.Notice(`Marked ${annotation.hits.length}\xD7 now`);
   }
 };
 
 // src/main.ts
-var AttentionPlugin = class extends import_obsidian9.Plugin {
+var AttentionPlugin = class extends import_obsidian10.Plugin {
   constructor() {
     super(...arguments);
     this.markdownHost = null;
@@ -1651,7 +1676,7 @@ var AttentionPlugin = class extends import_obsidian9.Plugin {
   async warmOpenFiles() {
     const paths = /* @__PURE__ */ new Set();
     this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
-      const file = leaf.view instanceof import_obsidian9.MarkdownView ? leaf.view.file : null;
+      const file = leaf.view instanceof import_obsidian10.MarkdownView ? leaf.view.file : null;
       if (file)
         paths.add(file.path);
     });
@@ -1676,10 +1701,14 @@ var AttentionPlugin = class extends import_obsidian9.Plugin {
   rerenderReadingViews() {
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (view instanceof import_obsidian9.MarkdownView && view.getMode() === "preview") {
+      if (view instanceof import_obsidian10.MarkdownView && view.getMode() === "preview") {
         view.previewMode.rerender(true);
       }
     }
+  }
+  /** Redraw after a setting that only affects how things are shown. */
+  refreshPanels() {
+    this.refreshReviewViews();
   }
   async rebuildIndex() {
     await this.index.rebuild();
@@ -1712,7 +1741,7 @@ var AttentionPlugin = class extends import_obsidian9.Plugin {
     await leaf.loadIfDeferred();
     await this.app.workspace.revealLeaf(leaf);
     if (!focus) {
-      const editor = this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
+      const editor = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
       if (editor)
         this.app.workspace.setActiveLeaf(editor.leaf, { focus: true });
     }
@@ -1732,10 +1761,10 @@ var AttentionPlugin = class extends import_obsidian9.Plugin {
    * is a sibling, so it travels with the folder — only a file's own rename does.
    */
   async handleRename(file, oldPath) {
-    if (!(file instanceof import_obsidian9.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian10.TFile) || isSidecarPath(file.path))
       return;
     const old = this.app.vault.getAbstractFileByPath(sidecarPathFor(oldPath));
-    if (!(old instanceof import_obsidian9.TFile))
+    if (!(old instanceof import_obsidian10.TFile))
       return;
     const nextPath = sidecarPathFor(file.path);
     if (old.path === nextPath)
@@ -1748,17 +1777,17 @@ var AttentionPlugin = class extends import_obsidian9.Plugin {
       this.index.renameFile(oldPath, file.path);
       this.refreshReviewViews();
     } catch (e) {
-      new import_obsidian9.Notice(`Attention: could not move annotations for ${file.name}`);
+      new import_obsidian10.Notice(`Attention: could not move annotations for ${file.name}`);
       console.error(e);
     }
   }
   async handleDelete(file) {
-    if (!(file instanceof import_obsidian9.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian10.TFile) || isSidecarPath(file.path))
       return;
     if (this.settings.keepOrphanedSidecars)
       return;
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
-    if (sidecar instanceof import_obsidian9.TFile)
+    if (sidecar instanceof import_obsidian10.TFile)
       await this.app.fileManager.trashFile(sidecar);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);

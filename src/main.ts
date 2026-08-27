@@ -136,6 +136,11 @@ export default class AttentionPlugin extends Plugin {
     }
   }
 
+  /** Redraw after a setting that only affects how things are shown. */
+  refreshPanels(): void {
+    this.refreshReviewViews();
+  }
+
   async rebuildIndex(): Promise<void> {
     await this.index.rebuild();
     this.refreshReviewViews();

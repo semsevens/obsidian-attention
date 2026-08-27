@@ -23,7 +23,7 @@ import { AttentionSettings } from '../../settings';
  */
 export class MarkdownHost {
   private popover: SelectionPopover;
-  private bubble = new CommentBubble();
+  private bubble: CommentBubble;
   /** The element right-clicked, captured before any menu is built. */
   private lastTarget: HTMLElement | null = null;
 
@@ -34,6 +34,7 @@ export class MarkdownHost {
     private settings: AttentionSettings,
   ) {
     this.popover = new SelectionPopover();
+    this.bubble = new CommentBubble(settings.timeFormat);
   }
 
   register(): void {

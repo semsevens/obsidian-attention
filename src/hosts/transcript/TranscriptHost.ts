@@ -24,7 +24,7 @@ const TRANSCRIPT_RENDERED = 'mt:transcript-rendered';
  */
 export class TranscriptHost {
   private popover: SelectionPopover;
-  private bubble = new CommentBubble();
+  private bubble: CommentBubble;
 
   constructor(
     private app: App,
@@ -33,6 +33,7 @@ export class TranscriptHost {
     private settings: AttentionSettings,
   ) {
     this.popover = new SelectionPopover();
+    this.bubble = new CommentBubble(settings.timeFormat);
   }
 
   register(): void {

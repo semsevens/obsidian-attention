@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type AttentionPlugin from './main';
+import { formatWhen, TIME_FORMAT_EXAMPLES } from './ui/time';
 
 export interface AttentionSettings {
   /**
@@ -17,6 +18,12 @@ export interface AttentionSettings {
    * telling apart, since that syntax lives in the note and these don't.
    */
   markStyle: 'underline' | 'background';
+
+  /**
+   * How timestamps are shown: a moment format string. Empty falls back to
+   * relative ("3 days ago"), which is locale-aware.
+   */
+  timeFormat: string;
 
   /**
    * Pop the colour swatches up as soon as a selection is made. The right-click
@@ -49,6 +56,7 @@ export interface AttentionSettings {
 export const DEFAULT_SETTINGS: AttentionSettings = {
   markColor: '#f5c542',
   markStyle: 'underline',
+  timeFormat: 'YYYY-MM-DD HH:mm:ss',
   popoverOnSelection: true,
   enableMarkdownHost: true,
   enableTranscriptHost: true,
@@ -79,6 +87,32 @@ export class AttentionSettingTab extends PluginSettingTab {
           this.plugin.applyMarkColor();
         }),
       );
+
+    const sample = new Date().toISOString();
+    const timeSetting = new Setting(containerEl)
+      .setName('Time format')
+      .addText(t =>
+        t
+          .setPlaceholder('empty = relative')
+          .setValue(this.plugin.settings.timeFormat)
+          .onChange(async v => {
+            this.plugin.settings.timeFormat = v.trim();
+            await this.plugin.saveSettings();
+            describeTime();
+            this.plugin.refreshPanels();
+          }),
+      );
+    const describeTime = () => {
+      const f = this.plugin.settings.timeFormat;
+      timeSetting.setDesc(
+        `Shown as: ${formatWhen(sample, f)}. ` +
+          (f
+            ? 'A moment format string — the same vocabulary as daily note filenames. ' +
+              'Clear it for relative times ("3 days ago"), in your Obsidian\'s language.'
+            : `Relative, and in your Obsidian's language. For an exact time, try ${TIME_FORMAT_EXAMPLES.join(' / ')}.`),
+      );
+    };
+    describeTime();
 
     new Setting(containerEl).setName('Where to annotate').setHeading();
 

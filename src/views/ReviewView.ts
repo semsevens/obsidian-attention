@@ -4,7 +4,7 @@ import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
 import { Annotation, isComment, lastMarked } from '../model';
 import { inDocumentOrder } from '../store/documentOrder';
 import { reveal } from '../hosts/markdown/reveal';
-import { formatWhen } from '../ui/CommentBubble';
+import { formatWhen } from '../ui/time';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
 
@@ -161,7 +161,7 @@ export class ReviewView extends ItemView {
     if (annotation.anchor.kind === 'transcript') {
       meta.createSpan({ text: fmtTime(annotation.anchor.start), cls: 'at-time' });
     }
-    meta.createSpan({ text: formatWhen(lastMarked(annotation)), cls: 'at-when' });
+    meta.createSpan({ text: formatWhen(lastMarked(annotation), this.plugin.settings.timeFormat), cls: 'at-when' });
     // A passage that caught you more than once is the point; say so.
     if (annotation.hits.length > 1) {
       meta.createSpan({ text: `${annotation.hits.length}×`, cls: 'at-hits' });

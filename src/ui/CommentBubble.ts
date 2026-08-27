@@ -1,4 +1,5 @@
-import { Annotation, lastMarked } from '../model';
+import { Annotation } from '../model';
+import { formatWhen } from './time';
 
 /**
  * What you get when you click a mark: its comment, when it caught you, and the
@@ -16,6 +17,9 @@ export interface BubbleActions {
 
 export class CommentBubble {
   private el: HTMLElement | null = null;
+
+  constructor(private timeFormat = '') {}
+
   private dismiss = (e: Event) => {
     if (e.target instanceof Node && this.el?.contains(e.target)) return;
     this.hide();
@@ -36,7 +40,7 @@ export class CommentBubble {
     times.createSpan({ cls: 'at-hit-count', text: hits.length === 1 ? 'Marked once' : `Marked ${hits.length}×` });
     // Newest first: the most recent time it landed is the one you're asking about.
     for (const at of [...hits].reverse()) {
-      times.createDiv('at-hit-time').setText(formatWhen(at));
+      times.createDiv('at-hit-time').setText(formatWhen(at, this.timeFormat));
     }
 
     const row = el.createDiv('at-bubble-actions');
@@ -75,14 +79,3 @@ export class CommentBubble {
   }
 }
 
-/** "Today", "3 days ago", or a date once it stops being relative to now. */
-export function formatWhen(iso: string, now = Date.now()): string {
-  const days = Math.floor((now - Date.parse(iso)) / 86_400_000);
-  if (!Number.isFinite(days)) return iso;
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 30) return `${days} days ago`;
-  return new Date(iso).toISOString().slice(0, 10);
-}
-
-export { lastMarked };

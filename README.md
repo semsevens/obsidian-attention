@@ -50,6 +50,10 @@ text — and it travels to any markdown tool. What it can't do is carry a commen
 a colour, or a date, or tell you what you marked last week; and it edits the file
 to exist at all.
 
+Timestamps use a moment format string — the same vocabulary as daily note
+filenames — defaulting to `YYYY-MM-DD HH:mm:ss`. Clear it for relative times
+("3 days ago"), which follow your Obsidian's language.
+
 Marks share one colour, set in settings. Choosing a swatch every time turns
 noticing something into a decision, and how often a passage caught you carries
 more than which shade you picked.
