@@ -68,8 +68,12 @@ export class MarkdownHost {
     // Left-click a highlight to read its comment. Guarded on an empty
     // selection so click-dragging across a highlight still just selects text.
     this.plugin.registerDomEvent(document, 'click', e => {
+      // Text only. Clicking a picture is Obsidian's own zoom gesture, and
+      // stealing it to show a bubble makes marked images behave unlike every
+      // other image in the vault. Their comment is on hover, and the full menu
+      // is on right-click.
       const el = e.target instanceof HTMLElement ? e.target : null;
-      const hit = el?.closest('.at-hl') ?? (el?.matches('img.at-img') ? el : null);
+      const hit = el?.closest('.at-hl') ?? null;
       if (!(hit instanceof HTMLElement)) return;
       if ((window.getSelection()?.toString().trim().length ?? 0) > 0) return;
       const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;

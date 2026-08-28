@@ -20,6 +20,25 @@ describe('findImageEmbeds', () => {
     expect(src.slice(e.to)).toBe('题图：晚霞');
   });
 
+  it('drops the display options after a pipe', () => {
+    // `![[photo.png|300]]` is how everyone resizes a picture; the size is not
+    // part of what the embed points at, and keeping it matched nothing.
+    expect(findImageEmbeds('![[photo.png|300]]')[0].target).toBe('photo.png');
+    expect(findImageEmbeds('![[a/b/photo.png|left|200]]')[0].target).toBe('a/b/photo.png');
+    // The quote still keeps the embed exactly as written.
+    expect(findImageEmbeds('![[photo.png|300]]')[0].text).toBe('![[photo.png|300]]');
+  });
+
+  it('decodes a percent-encoded markdown path', () => {
+    const [e] = findImageEmbeds('![alt](%E7%A5%A8%E5%9C%88/attachments/a.png)');
+    expect(e.target).toBe('票圈/attachments/a.png');
+  });
+
+  it('leaves a URL that will not decode alone', () => {
+    expect(findImageEmbeds('![x](https://x.test/%E0%A4.png)')[0].target)
+      .toBe('https://x.test/%E0%A4.png');
+  });
+
   it('ignores links, which are not embeds', () => {
     expect(findImageEmbeds('see [the docs](https://x.test) and [[a note]]')).toEqual([]);
   });

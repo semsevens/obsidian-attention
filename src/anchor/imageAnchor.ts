@@ -30,10 +30,27 @@ export function findImageEmbeds(source: string): ImageEmbed[] {
       text: m[0],
       from: m.index,
       to: m.index + m[0].length,
-      target: (m[1] ?? m[3] ?? '').trim(),
+      target: cleanTarget(m[1] ?? m[3] ?? ''),
     });
   }
   return out;
+}
+
+/**
+ * The file or URL an embed actually points at.
+ *
+ * Wiki embeds carry display options after a pipe — `![[photo.png|300]]` is how
+ * everyone resizes a picture — and those are not part of the target. Markdown
+ * paths arrive percent-encoded, while the rendered src decodes to the real
+ * name, so they are decoded here to be compared like with like.
+ */
+function cleanTarget(raw: string): string {
+  const withoutOptions = raw.split('|')[0].trim();
+  try {
+    return decodeURIComponent(withoutOptions);
+  } catch {
+    return withoutOptions;
+  }
 }
 
 /** The target of a stored embed quote, or null if it isn't one. */

@@ -1141,10 +1141,18 @@ function findImageEmbeds(source) {
       text: m[0],
       from: m.index,
       to: m.index + m[0].length,
-      target: ((_b = (_a = m[1]) != null ? _a : m[3]) != null ? _b : "").trim()
+      target: cleanTarget((_b = (_a = m[1]) != null ? _a : m[3]) != null ? _b : "")
     });
   }
   return out;
+}
+function cleanTarget(raw) {
+  const withoutOptions = raw.split("|")[0].trim();
+  try {
+    return decodeURIComponent(withoutOptions);
+  } catch (e) {
+    return withoutOptions;
+  }
 }
 function imageTargetOf(quote) {
   const found = findImageEmbeds(quote);
@@ -1318,7 +1326,7 @@ var MarkdownHost = class {
     this.plugin.registerDomEvent(document, "click", (e) => {
       var _a, _b, _c, _d;
       const el = e.target instanceof HTMLElement ? e.target : null;
-      const hit = (_a = el == null ? void 0 : el.closest(".at-hl")) != null ? _a : (el == null ? void 0 : el.matches("img.at-img")) ? el : null;
+      const hit = (_a = el == null ? void 0 : el.closest(".at-hl")) != null ? _a : null;
       if (!(hit instanceof HTMLElement))
         return;
       if (((_c = (_b = window.getSelection()) == null ? void 0 : _b.toString().trim().length) != null ? _c : 0) > 0)
@@ -1673,6 +1681,8 @@ function paintImages(root, annotations) {
     img.addClass("at-img");
     img.toggleClass("at-img-comment", isComment(hit.annotation));
     img.dataset.atId = hit.annotation.id;
+    const body = hit.annotation.body;
+    img.setAttribute("title", body && body.trim() ? body : "Marked \u2014 right-click for options");
   }
 }
 
