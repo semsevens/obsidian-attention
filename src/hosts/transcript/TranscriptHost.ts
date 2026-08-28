@@ -243,9 +243,14 @@ export class TranscriptHost {
 
     this.bubble.showFor(el.getBoundingClientRect(), annotation, {
       onEdit: () => { void this.editComment(mediaPath, id); },
-      onMarkAgain: () => { void this.mark(mediaPath, annotation.anchor as TranscriptAnchor, null); },
+      onMarkAgain: () => { void this.markAgain(mediaPath, id); },
       onRemove: () => { void this.store.remove(mediaPath, id); },
     });
+  }
+
+  private async markAgain(targetPath: string, id: string): Promise<void> {
+    const updated = await this.store.markAgain(targetPath, id);
+    if (updated) new Notice(`Marked ${updated.hits.length}× now`);
   }
 
   private async editComment(mediaPath: string, id: string): Promise<void> {

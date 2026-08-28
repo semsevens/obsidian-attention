@@ -116,3 +116,21 @@ describe('bucketing uses the most recent hit', () => {
     expect(lastMarked(annotation).startsWith('2026-08-27')).toBe(true);
   });
 });
+
+describe('marking again from a list', () => {
+  it('adds a hit without needing the anchor rebuilt', async () => {
+    const app = makeApp(new Map());
+    const store = new AnnotationStore(app as never, new AttentionIndex(app as never));
+    const { annotation } = await store.mark('a.md', md('x', 0, 1), null);
+
+    const again = await store.markAgain('a.md', annotation.id);
+    expect(again?.hits).toHaveLength(2);
+    expect((await store.get('a.md')).annotations).toHaveLength(1);
+  });
+
+  it('answers null for an id that is gone', async () => {
+    const app = makeApp(new Map());
+    const store = new AnnotationStore(app as never, new AttentionIndex(app as never));
+    expect(await store.markAgain('a.md', 'nope')).toBeNull();
+  });
+});

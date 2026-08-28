@@ -98,7 +98,7 @@ export class MarkdownHost {
 
     this.bubble.showFor(el.getBoundingClientRect(), annotation, {
       onEdit: () => { void this.editComment(file, id); },
-      onMarkAgain: () => { void this.mark(file, annotation.anchor as MarkdownAnchor, null); },
+      onMarkAgain: () => { void this.markAgain(file.path, id); },
       onRemove: () => { void this.store.remove(file.path, id); },
     });
   }
@@ -249,6 +249,11 @@ export class MarkdownHost {
     new CommentModal(this.app, anchor.quote, initial, body => {
       void this.mark(file, anchor, body || null);
     }).open();
+  }
+
+  private async markAgain(targetPath: string, id: string): Promise<void> {
+    const updated = await this.store.markAgain(targetPath, id);
+    if (updated) new Notice(`Marked ${updated.hits.length}× now`);
   }
 
   private async editComment(file: TFile, id: string): Promise<void> {

@@ -760,6 +760,13 @@ var ReviewView = class extends import_obsidian6.ItemView {
       });
     };
     act(
+      "\uFF0B",
+      "Mark again \u2014 it caught you once more",
+      () => {
+        void this.markAgain(targetPath, annotation);
+      }
+    );
+    act(
       "\u{1F4AC}",
       isComment(annotation) ? "Edit comment" : "Add a comment",
       () => this.editComment(targetPath, annotation)
@@ -783,6 +790,9 @@ var ReviewView = class extends import_obsidian6.ItemView {
     menu.addItem((i) => i.setTitle("Go to").setIcon("arrow-right").onClick(() => {
       void this.jumpTo(annotation, targetPath);
     }));
+    menu.addItem((i) => i.setTitle("Mark again").setIcon("plus").onClick(() => {
+      void this.markAgain(targetPath, annotation);
+    }));
     menu.addItem((i) => i.setTitle(isComment(annotation) ? "Edit comment\u2026" : "Add a comment\u2026").setIcon("message-square").onClick(() => this.editComment(targetPath, annotation)));
     menu.addItem((i) => i.setTitle("Copy text").setIcon("copy").onClick(() => {
       void navigator.clipboard.writeText(annotation.anchor.quote);
@@ -791,6 +801,11 @@ var ReviewView = class extends import_obsidian6.ItemView {
       void this.plugin.store.remove(targetPath, annotation.id);
     }));
     menu.showAtMouseEvent(e);
+  }
+  async markAgain(targetPath, annotation) {
+    const updated = await this.plugin.store.markAgain(targetPath, annotation.id);
+    if (updated)
+      new import_obsidian6.Notice(`Marked ${updated.hits.length}\xD7 now`);
   }
   editComment(targetPath, annotation) {
     var _a;
@@ -889,6 +904,24 @@ ${body}` : body;
     data.annotations.push(annotation);
     await this.commit(targetPath, data);
     return { annotation, repeat: false };
+  }
+  /**
+   * Record another hit on an annotation you already have in hand.
+   *
+   * Same effect as marking the passage again, but addressed by id — the review
+   * panel is looking at the annotation, not at the text, and shouldn't have to
+   * reconstruct an anchor to say "this still matters".
+   */
+  async markAgain(targetPath, id) {
+    const data = await this.get(targetPath);
+    const target = data.annotations.find((a) => a.id === id);
+    if (!target)
+      return null;
+    const now = new Date().toISOString();
+    target.hits.push(now);
+    target.updated = now;
+    await this.commit(targetPath, data);
+    return target;
   }
   async add(targetPath, annotation) {
     const data = await this.get(targetPath);
@@ -1121,7 +1154,7 @@ var MarkdownHost = class {
         void this.editComment(file, id);
       },
       onMarkAgain: () => {
-        void this.mark(file, annotation.anchor, null);
+        void this.markAgain(file.path, id);
       },
       onRemove: () => {
         void this.store.remove(file.path, id);
@@ -1257,6 +1290,11 @@ var MarkdownHost = class {
     new CommentModal(this.app, anchor.quote, initial, (body) => {
       void this.mark(file, anchor, body || null);
     }).open();
+  }
+  async markAgain(targetPath, id) {
+    const updated = await this.store.markAgain(targetPath, id);
+    if (updated)
+      new import_obsidian7.Notice(`Marked ${updated.hits.length}\xD7 now`);
   }
   async editComment(file, id) {
     var _a;
@@ -1679,12 +1717,17 @@ var TranscriptHost = class {
         void this.editComment(mediaPath, id);
       },
       onMarkAgain: () => {
-        void this.mark(mediaPath, annotation.anchor, null);
+        void this.markAgain(mediaPath, id);
       },
       onRemove: () => {
         void this.store.remove(mediaPath, id);
       }
     });
+  }
+  async markAgain(targetPath, id) {
+    const updated = await this.store.markAgain(targetPath, id);
+    if (updated)
+      new import_obsidian9.Notice(`Marked ${updated.hits.length}\xD7 now`);
   }
   async editComment(mediaPath, id) {
     var _a;

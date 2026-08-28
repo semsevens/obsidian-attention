@@ -100,6 +100,24 @@ export class AnnotationStore {
     return { annotation, repeat: false };
   }
 
+  /**
+   * Record another hit on an annotation you already have in hand.
+   *
+   * Same effect as marking the passage again, but addressed by id — the review
+   * panel is looking at the annotation, not at the text, and shouldn't have to
+   * reconstruct an anchor to say "this still matters".
+   */
+  async markAgain(targetPath: string, id: string): Promise<Annotation | null> {
+    const data = await this.get(targetPath);
+    const target = data.annotations.find(a => a.id === id);
+    if (!target) return null;
+    const now = new Date().toISOString();
+    target.hits.push(now);
+    target.updated = now;
+    await this.commit(targetPath, data);
+    return target;
+  }
+
   async add(targetPath: string, annotation: Annotation): Promise<void> {
     const data = await this.get(targetPath);
     data.annotations.push(annotation);

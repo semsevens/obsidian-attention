@@ -39,9 +39,9 @@ annotations:
   button that brings back a handful you haven't revisited
 
 Sort either view by document position, when it was last or first marked, or how
-many times it caught you. Hovering an entry reveals buttons to comment on or
-remove that mark without going to find it first; right-click gives the full
-menu. Clicking an entry jumps to the passage and flashes it. The panel appears on its
+many times it caught you. Hovering an entry reveals buttons to mark it again, comment on it, or remove it
+without going to find it first; right-click gives the full menu. The count
+appears only once a passage has caught you more than once. Clicking an entry jumps to the passage and flashes it. The panel appears on its
 own when you open a note that has annotations, and stays out of the way when you
 open one that doesn't.
 

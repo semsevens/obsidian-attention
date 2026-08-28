@@ -1,4 +1,4 @@
-import { ItemView, Menu, WorkspaceLeaf, TFile } from 'obsidian';
+import { ItemView, Menu, Notice, WorkspaceLeaf, TFile } from 'obsidian';
 import type AttentionPlugin from '../main';
 import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
 import { Annotation, isComment, lastMarked } from '../model';
@@ -213,6 +213,10 @@ export class ReviewView extends ItemView {
         fn();
       });
     };
+    // Re-marking from the list: the passage came back to mind, which is worth
+    // recording even when you aren't looking at it in the note.
+    act('＋', 'Mark again — it caught you once more',
+        () => { void this.markAgain(targetPath, annotation); });
     act('💬', isComment(annotation) ? 'Edit comment' : 'Add a comment',
         () => this.editComment(targetPath, annotation));
     act('✕', 'Remove this mark',
@@ -227,6 +231,8 @@ export class ReviewView extends ItemView {
     const menu = new Menu();
     menu.addItem(i => i.setTitle('Go to').setIcon('arrow-right')
       .onClick(() => { void this.jumpTo(annotation, targetPath); }));
+    menu.addItem(i => i.setTitle('Mark again').setIcon('plus')
+      .onClick(() => { void this.markAgain(targetPath, annotation); }));
     menu.addItem(i => i.setTitle(isComment(annotation) ? 'Edit comment…' : 'Add a comment…')
       .setIcon('message-square').onClick(() => this.editComment(targetPath, annotation)));
     menu.addItem(i => i.setTitle('Copy text').setIcon('copy')
@@ -234,6 +240,11 @@ export class ReviewView extends ItemView {
     menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
       .onClick(() => { void this.plugin.store.remove(targetPath, annotation.id); }));
     menu.showAtMouseEvent(e);
+  }
+
+  private async markAgain(targetPath: string, annotation: Annotation): Promise<void> {
+    const updated = await this.plugin.store.markAgain(targetPath, annotation.id);
+    if (updated) new Notice(`Marked ${updated.hits.length}× now`);
   }
 
   private editComment(targetPath: string, annotation: Annotation): void {
