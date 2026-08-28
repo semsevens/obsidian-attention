@@ -25,6 +25,11 @@ export function classify(annotations: readonly Annotation[], text: string): Clas
   const live: Annotation[] = [];
   const lost: Annotation[] = [];
 
+  // No text means we failed to read the file, not that its contents vanished.
+  // Calling every mark lost on the strength of that is a false alarm about the
+  // one thing this plugin must not get wrong.
+  if (text.length === 0) return { live: [...annotations], lost };
+
   for (const a of annotations) {
     if (a.anchor.kind !== 'markdown') {
       live.push(a);

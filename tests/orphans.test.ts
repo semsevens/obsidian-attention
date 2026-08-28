@@ -46,8 +46,16 @@ describe('classify', () => {
     expect(lost).toEqual([]);
   });
 
-  it('copes with an empty file and an empty list', () => {
+  it('copes with an empty list', () => {
     expect(classify([], TEXT)).toEqual({ live: [], lost: [] });
-    expect(classify([md('反向传播')], '').lost).toHaveLength(1);
+  });
+
+  it('does not cry lost when the text could not be read', () => {
+    // An editor that has just opened hands back an empty buffer for a moment.
+    // Declaring every mark in the file lost on that basis is a false alarm
+    // about the one thing this must not get wrong.
+    const { live, lost } = classify([md('反向传播')], '');
+    expect(live).toHaveLength(1);
+    expect(lost).toEqual([]);
   });
 });

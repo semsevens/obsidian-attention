@@ -5,6 +5,7 @@ import { Annotation, isComment, lastMarked } from '../model';
 import { Sort, SORT_LABELS, sortsFor, resolveSort, sortAnnotations } from '../store/sorting';
 import { inDocumentOrder } from '../store/documentOrder';
 import { classify } from '../store/orphans';
+import { transcludedNotes } from '../store/transclusions';
 import { describe as describeAnchor } from '../anchor/textQuote';
 import { MarkdownView } from 'obsidian';
 import { isImageQuote } from '../anchor/imageAnchor';
@@ -132,12 +133,10 @@ export class ReviewView extends ItemView {
       return;
     }
 
+    // No early return on an empty file: a note with nothing of its own can
+    // still be showing marks from something it transcludes.
     const data = await this.plugin.store.get(file.path);
     if (seq !== this.generation) return;
-    if (data.annotations.length === 0) {
-      this.empty(root, `Nothing marked in “${file.basename}”.`);
-      return;
-    }
 
     // Read once, and use it for both ordering and deciding what's still
     // findable. Prefer the open editor's buffer: cachedRead lags behind
@@ -165,7 +164,20 @@ export class ReviewView extends ItemView {
       for (const a of lost) this.renderEntry(root, a, file.path, true);
     }
 
-    if (ordered.length === 0 && lost.length === 0) {
+    // Notes transcluded into this one are on screen too, so their marks are
+    // part of what you're reading. Shown separately, with their source, since
+    // acting on them edits another file.
+    let embedded = 0;
+    for (const note of transcludedNotes(this.app, file)) {
+      const theirs = (await this.plugin.store.get(note.path)).annotations;
+      if (seq !== this.generation) return;
+      if (theirs.length === 0) continue;
+      if (embedded === 0) root.createDiv('at-bucket-title').setText('From embedded notes');
+      embedded += theirs.length;
+      for (const a of theirs) this.renderEntry(root, a, note.path, false, true);
+    }
+
+    if (ordered.length === 0 && lost.length === 0 && embedded === 0) {
       this.empty(root, `Nothing marked in “${file.basename}”.`);
     }
   }
@@ -199,12 +211,20 @@ export class ReviewView extends ItemView {
 
   // ── Shared ─────────────────────────────────────────────────────────────────
 
-  /** What the file says right now — from the editor if it's open, else disk. */
+  /**
+   * What the file says right now — from the editor if it's open, else disk.
+   *
+   * An editor that has just been opened can hand back an empty buffer for a
+   * moment. Judging marks against that says every one of them is lost, which
+   * is both alarming and wrong, so an empty answer falls through to the file.
+   */
   private async currentText(file: TFile): Promise<string> {
     for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
       const view = leaf.view;
       if (view instanceof MarkdownView && view.file?.path === file.path) {
-        return view.editor.getValue();
+        const buffer = view.editor?.getValue() ?? '';
+        if (buffer.length > 0) return buffer;
+        break;
       }
     }
     try { return await this.app.vault.cachedRead(file); } catch { return ''; }
@@ -214,7 +234,13 @@ export class ReviewView extends ItemView {
     root.createDiv('at-empty').setText(message);
   }
 
-  private renderEntry(root: HTMLElement, annotation: Annotation, targetPath: string, lost = false): void {
+  private renderEntry(
+    root: HTMLElement,
+    annotation: Annotation,
+    targetPath: string,
+    lost = false,
+    fromEmbed = false,
+  ): void {
     const el = root.createDiv('at-entry');
     if (lost) el.addClass('at-entry-lost');
 
@@ -239,7 +265,7 @@ export class ReviewView extends ItemView {
 
     const left = meta.createDiv('at-meta-left');
     // In the per-note outline the filename is noise — it's the same every time.
-    if (this.lens === 'all' || this.resurfaced) {
+    if (this.lens === 'all' || this.resurfaced || fromEmbed) {
       const name = targetPath.split('/').pop() ?? targetPath;
       left.createSpan({ text: name.replace(/\.md$/, ''), cls: 'at-source' });
     }

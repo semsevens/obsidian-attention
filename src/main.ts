@@ -55,6 +55,7 @@ export default class AttentionPlugin extends Plugin {
     this.register(this.store.onChange(() => {
       repaintEditors(this.app, path => this.store.peek(path));
       this.rerenderReadingViews();
+      repaintReadingViews(this.app, path => this.store.peek(path));
       this.refreshReviewViews();
     }));
 

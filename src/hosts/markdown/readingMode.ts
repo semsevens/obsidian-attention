@@ -3,6 +3,7 @@ import { Provider } from './decorations';
 import { paintQuote } from '../paintQuote';
 import { strip } from '../../anchor/plainText';
 import { paintImages } from '../paintImage';
+import { transcludedNotes } from '../../store/transclusions';
 
 /**
  * Highlights for reading mode.
@@ -35,11 +36,25 @@ export function repaintReadingViews(app: App, provider: Provider): void {
     if (!(container instanceof HTMLElement)) continue;
 
     const annotations = provider(view.file.path);
-    if (annotations.length === 0) continue;
     paintImages(container, annotations);
     for (const a of annotations) {
       if (a.anchor.kind !== 'markdown') continue;
       paintQuote(container, a, strip(a.anchor.quote));
+    }
+
+    // Marks belonging to notes transcluded into this one, painted inside the
+    // transclusion they came from.
+    for (const note of transcludedNotes(app, view.file)) {
+      const theirs = provider(note.path);
+      if (theirs.length === 0) continue;
+      for (const box of Array.from(container.querySelectorAll('.internal-embed, .markdown-embed'))) {
+        if (!(box instanceof HTMLElement)) continue;
+        paintImages(box, theirs);
+        for (const a of theirs) {
+          if (a.anchor.kind !== 'markdown') continue;
+          paintQuote(box, a, strip(a.anchor.quote));
+        }
+      }
     }
   }
 }

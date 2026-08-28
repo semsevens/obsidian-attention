@@ -663,6 +663,8 @@ async function inDocumentOrder(app, file, annotations, text) {
 function classify(annotations, text) {
   const live = [];
   const lost = [];
+  if (text.length === 0)
+    return { live: [...annotations], lost };
   for (const a of annotations) {
     if (a.anchor.kind !== "markdown") {
       live.push(a);
@@ -671,6 +673,25 @@ function classify(annotations, text) {
     (resolveMarkdown(text, a.anchor) ? live : lost).push(a);
   }
   return { live, lost };
+}
+
+// src/store/transclusions.ts
+function transcludedNotes(app, file) {
+  var _a, _b;
+  const embeds = (_b = (_a = app.metadataCache.getFileCache(file)) == null ? void 0 : _a.embeds) != null ? _b : [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set([file.path]);
+  for (const embed of embeds) {
+    const link = embed.link.split("#")[0].split("|")[0].trim();
+    if (!link)
+      continue;
+    const target = app.metadataCache.getFirstLinkpathDest(link, file.path);
+    if (!target || target.extension !== "md" || seen.has(target.path))
+      continue;
+    seen.add(target.path);
+    out.push(target);
+  }
+  return out;
 }
 
 // src/views/ReviewView.ts
@@ -889,10 +910,6 @@ var ReviewView = class extends import_obsidian6.ItemView {
     const data = await this.plugin.store.get(file.path);
     if (seq !== this.generation)
       return;
-    if (data.annotations.length === 0) {
-      this.empty(root, `Nothing marked in \u201C${file.basename}\u201D.`);
-      return;
-    }
     const text = await this.currentText(file);
     if (seq !== this.generation)
       return;
@@ -910,7 +927,20 @@ var ReviewView = class extends import_obsidian6.ItemView {
       for (const a of lost)
         this.renderEntry(root, a, file.path, true);
     }
-    if (ordered.length === 0 && lost.length === 0) {
+    let embedded = 0;
+    for (const note of transcludedNotes(this.app, file)) {
+      const theirs = (await this.plugin.store.get(note.path)).annotations;
+      if (seq !== this.generation)
+        return;
+      if (theirs.length === 0)
+        continue;
+      if (embedded === 0)
+        root.createDiv("at-bucket-title").setText("From embedded notes");
+      embedded += theirs.length;
+      for (const a of theirs)
+        this.renderEntry(root, a, note.path, false, true);
+    }
+    if (ordered.length === 0 && lost.length === 0 && embedded === 0) {
       this.empty(root, `Nothing marked in \u201C${file.basename}\u201D.`);
     }
   }
@@ -939,13 +969,22 @@ var ReviewView = class extends import_obsidian6.ItemView {
     }
   }
   // ── Shared ─────────────────────────────────────────────────────────────────
-  /** What the file says right now — from the editor if it's open, else disk. */
+  /**
+   * What the file says right now — from the editor if it's open, else disk.
+   *
+   * An editor that has just been opened can hand back an empty buffer for a
+   * moment. Judging marks against that says every one of them is lost, which
+   * is both alarming and wrong, so an empty answer falls through to the file.
+   */
   async currentText(file) {
-    var _a;
+    var _a, _b, _c;
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
       if (view instanceof import_obsidian7.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === file.path) {
-        return view.editor.getValue();
+        const buffer = (_c = (_b = view.editor) == null ? void 0 : _b.getValue()) != null ? _c : "";
+        if (buffer.length > 0)
+          return buffer;
+        break;
       }
     }
     try {
@@ -957,7 +996,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
   empty(root, message) {
     root.createDiv("at-empty").setText(message);
   }
-  renderEntry(root, annotation, targetPath, lost = false) {
+  renderEntry(root, annotation, targetPath, lost = false, fromEmbed = false) {
     var _a, _b;
     const el = root.createDiv("at-entry");
     if (lost)
@@ -973,7 +1012,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
     }
     const meta = el.createDiv("at-meta");
     const left = meta.createDiv("at-meta-left");
-    if (this.lens === "all" || this.resurfaced) {
+    if (this.lens === "all" || this.resurfaced || fromEmbed) {
       const name = (_b = targetPath.split("/").pop()) != null ? _b : targetPath;
       left.createSpan({ text: name.replace(/\.md$/, ""), cls: "at-source" });
     }
@@ -2115,13 +2154,26 @@ function repaintReadingViews(app, provider) {
     if (!(container instanceof HTMLElement))
       continue;
     const annotations = provider(view.file.path);
-    if (annotations.length === 0)
-      continue;
     paintImages(container, annotations);
     for (const a of annotations) {
       if (a.anchor.kind !== "markdown")
         continue;
       paintQuote(container, a, strip(a.anchor.quote));
+    }
+    for (const note of transcludedNotes(app, view.file)) {
+      const theirs = provider(note.path);
+      if (theirs.length === 0)
+        continue;
+      for (const box of Array.from(container.querySelectorAll(".internal-embed, .markdown-embed"))) {
+        if (!(box instanceof HTMLElement))
+          continue;
+        paintImages(box, theirs);
+        for (const a of theirs) {
+          if (a.anchor.kind !== "markdown")
+            continue;
+          paintQuote(box, a, strip(a.anchor.quote));
+        }
+      }
     }
   }
 }
@@ -2500,6 +2552,7 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
     this.register(this.store.onChange(() => {
       repaintEditors(this.app, (path) => this.store.peek(path));
       this.rerenderReadingViews();
+      repaintReadingViews(this.app, (path) => this.store.peek(path));
       this.refreshReviewViews();
     }));
     this.registerEvent(this.app.workspace.on("file-open", (file) => {

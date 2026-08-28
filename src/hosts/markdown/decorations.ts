@@ -6,6 +6,8 @@ import { resolveMarkdown } from '../../anchor/resolveAnchor';
 import { paintQuote } from '../paintQuote';
 import { paintImages } from '../paintImage';
 import { Change } from '../../anchor/repair';
+import { transcludedNotes } from '../../store/transclusions';
+import { strip } from '../../anchor/plainText';
 
 /**
  * Highlights for Live Preview and source mode.
