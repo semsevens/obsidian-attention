@@ -21,21 +21,35 @@ export interface Classified {
  * subtitle track is loaded, which this doesn't have in hand — and subtitle
  * files, being generated rather than edited, rarely lose their marks anyway.
  */
-export function classify(annotations: readonly Annotation[], text: string): Classified {
+/**
+ * Split a file's annotations by whether they still resolve.
+ *
+ * More than one version of a file can be in play — the editor's buffer and what
+ * is on disk — and they disagree constantly: the buffer leads while you type,
+ * and lags while a view is switching files, briefly still holding the previous
+ * note. A mark counts as lost only when *no* version has it. Getting this wrong
+ * announces that everything in the file is gone, which is alarming and almost
+ * always untrue.
+ *
+ * Only markdown anchors are judged. A transcript anchor lives against whichever
+ * subtitle track is loaded, which this doesn't have in hand — and subtitle
+ * files, being generated rather than edited, rarely lose their marks anyway.
+ */
+export function classify(annotations: readonly Annotation[], ...versions: string[]): Classified {
   const live: Annotation[] = [];
   const lost: Annotation[] = [];
 
-  // No text means we failed to read the file, not that its contents vanished.
-  // Calling every mark lost on the strength of that is a false alarm about the
-  // one thing this plugin must not get wrong.
-  if (text.length === 0) return { live: [...annotations], lost };
+  // Nothing readable means we failed to read, not that the contents vanished.
+  const usable = versions.filter(v => v.length > 0);
+  if (usable.length === 0) return { live: [...annotations], lost };
 
   for (const a of annotations) {
     if (a.anchor.kind !== 'markdown') {
       live.push(a);
       continue;
     }
-    (resolveMarkdown(text, a.anchor) ? live : lost).push(a);
+    const anchor = a.anchor;
+    (usable.some(v => resolveMarkdown(v, anchor)) ? live : lost).push(a);
   }
 
   return { live, lost };

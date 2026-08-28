@@ -142,8 +142,10 @@ export class ReviewView extends ItemView {
     // findable. Prefer the open editor's buffer: cachedRead lags behind
     // unsaved typing, and judging a mark lost against stale text is a lie.
     const text = await this.currentText(file);
+    const onDisk = await this.diskText(file);
     if (seq !== this.generation) return;
-    const { live, lost } = classify(data.annotations, text);
+    // Both: the buffer leads while typing and lags while a view switches files.
+    const { live, lost } = classify(data.annotations, text, onDisk);
 
     const ordered = this.sort === 'document'
       ? await inDocumentOrder(this.app, file, live, text)
@@ -227,6 +229,10 @@ export class ReviewView extends ItemView {
         break;
       }
     }
+    try { return await this.app.vault.cachedRead(file); } catch { return ''; }
+  }
+
+  private async diskText(file: TFile): Promise<string> {
     try { return await this.app.vault.cachedRead(file); } catch { return ''; }
   }
 

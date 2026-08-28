@@ -660,17 +660,19 @@ async function inDocumentOrder(app, file, annotations, text) {
 }
 
 // src/store/orphans.ts
-function classify(annotations, text) {
+function classify(annotations, ...versions) {
   const live = [];
   const lost = [];
-  if (text.length === 0)
+  const usable = versions.filter((v) => v.length > 0);
+  if (usable.length === 0)
     return { live: [...annotations], lost };
   for (const a of annotations) {
     if (a.anchor.kind !== "markdown") {
       live.push(a);
       continue;
     }
-    (resolveMarkdown(text, a.anchor) ? live : lost).push(a);
+    const anchor = a.anchor;
+    (usable.some((v) => resolveMarkdown(v, anchor)) ? live : lost).push(a);
   }
   return { live, lost };
 }
@@ -911,9 +913,10 @@ var ReviewView = class extends import_obsidian6.ItemView {
     if (seq !== this.generation)
       return;
     const text = await this.currentText(file);
+    const onDisk = await this.diskText(file);
     if (seq !== this.generation)
       return;
-    const { live, lost } = classify(data.annotations, text);
+    const { live, lost } = classify(data.annotations, text, onDisk);
     const ordered = this.sort === "document" ? await inDocumentOrder(this.app, file, live, text) : sortAnnotations(live.map((annotation) => ({ annotation })), this.sort).map((x) => x.annotation);
     if (seq !== this.generation)
       return;
@@ -987,6 +990,13 @@ var ReviewView = class extends import_obsidian6.ItemView {
         break;
       }
     }
+    try {
+      return await this.app.vault.cachedRead(file);
+    } catch (e) {
+      return "";
+    }
+  }
+  async diskText(file) {
     try {
       return await this.app.vault.cachedRead(file);
     } catch (e) {
@@ -1467,7 +1477,8 @@ var MarkdownHost = class {
         return;
       if (((_c = (_b = window.getSelection()) == null ? void 0 : _b.toString().trim().length) != null ? _c : 0) > 0)
         return;
-      const file = (_d = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView)) == null ? void 0 : _d.file;
+      const view = this.viewContaining(hit);
+      const file = view && ((_d = this.embeddedFileAt(hit, view.file)) != null ? _d : view.file);
       if (file)
         void this.showBubble(file, hit);
     });
@@ -1640,16 +1651,16 @@ var MarkdownHost = class {
   }
   // ── Editing modes ──────────────────────────────────────────────────────────
   onEditorMenu(menu, editor, info) {
-    var _a, _b;
+    var _a, _b, _c;
     const file = info.file;
     if (!file)
       return;
     const existing = (_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl");
     if (existing instanceof HTMLElement) {
-      this.addExistingItems(menu, file, existing);
+      this.addExistingItems(menu, (_b = this.embeddedFileAt(existing, file)) != null ? _b : file, existing);
       return;
     }
-    const img = (_b = this.lastTarget) == null ? void 0 : _b.closest("img");
+    const img = (_c = this.lastTarget) == null ? void 0 : _c.closest("img");
     if (img instanceof HTMLImageElement) {
       this.addImageItems(menu, file, img);
       return;
@@ -1660,7 +1671,7 @@ var MarkdownHost = class {
   }
   // ── Reading mode ───────────────────────────────────────────────────────────
   async showReadingMenu(e, view) {
-    var _a, _b;
+    var _a, _b, _c;
     const file = view.file;
     if (!file)
       return;
@@ -1668,7 +1679,7 @@ var MarkdownHost = class {
     const existing = (_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl");
     const img = (_b = this.lastTarget) == null ? void 0 : _b.closest("img");
     if (existing instanceof HTMLElement) {
-      this.addExistingItems(menu, file, existing);
+      this.addExistingItems(menu, (_c = this.embeddedFileAt(existing, file)) != null ? _c : file, existing);
     } else if (img instanceof HTMLImageElement) {
       this.addImageItems(menu, file, img);
     } else {

@@ -96,7 +96,10 @@ export class MarkdownHost {
       const hit = el?.closest('.at-hl') ?? null;
       if (!(hit instanceof HTMLElement)) return;
       if ((window.getSelection()?.toString().trim().length ?? 0) > 0) return;
-      const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
+      // A mark inside a transclusion belongs to the note it came from, so
+      // that is where to look it up — the host has never heard of it.
+      const view = this.viewContaining(hit);
+      const file = view && (this.embeddedFileAt(hit, view.file!) ?? view.file);
       if (file) void this.showBubble(file, hit);
     });
 
@@ -269,7 +272,7 @@ export class MarkdownHost {
 
     const existing = this.lastTarget?.closest('.at-hl');
     if (existing instanceof HTMLElement) {
-      this.addExistingItems(menu, file, existing);
+      this.addExistingItems(menu, this.embeddedFileAt(existing, file) ?? file, existing);
       return;
     }
 
@@ -294,7 +297,7 @@ export class MarkdownHost {
     const existing = this.lastTarget?.closest('.at-hl');
     const img = this.lastTarget?.closest('img');
     if (existing instanceof HTMLElement) {
-      this.addExistingItems(menu, file, existing);
+      this.addExistingItems(menu, this.embeddedFileAt(existing, file) ?? file, existing);
     } else if (img instanceof HTMLImageElement) {
       this.addImageItems(menu, file, img);
     } else {
