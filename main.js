@@ -1349,6 +1349,14 @@ function isInsideHighlight(node) {
 
 // src/hosts/markdown/decorations.ts
 var refreshAnnotations = import_state.StateEffect.define();
+var onEdit = null;
+var onDrift = null;
+function setEditListener(listener) {
+  onEdit = listener;
+}
+function setDriftListener(listener) {
+  onDrift = listener;
+}
 function build(view, provider) {
   var _a, _b;
   const path = (_b = (_a = view.state.field(import_obsidian8.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
@@ -1365,6 +1373,8 @@ function build(view, provider) {
     const at = resolve(doc, a.anchor);
     if (!at || at.from === at.to)
       continue;
+    if (at.how !== "exact")
+      onDrift == null ? void 0 : onDrift(path, a.id, a.anchor, doc, at);
     ranges.push(
       import_view.Decoration.mark({
         class: isComment(a) ? "at-hl at-hl-comment" : "at-hl",
@@ -1384,6 +1394,8 @@ function annotationDecorations(provider) {
         const refreshed = u.transactions.some(
           (t) => t.effects.some((e) => e.is(refreshAnnotations))
         );
+        if (u.docChanged)
+          reportEdit(u);
         if (u.docChanged || u.viewportChanged || refreshed) {
           this.decorations = build(u.view, provider);
         }
@@ -1391,6 +1403,20 @@ function annotationDecorations(provider) {
     },
     { decorations: (v) => v.decorations }
   );
+}
+function reportEdit(u) {
+  var _a, _b;
+  if (!onEdit)
+    return;
+  const path = (_b = (_a = u.state.field(import_obsidian8.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+  if (!path)
+    return;
+  const changes = [];
+  u.changes.iterChanges((fromA, toA, fromB, toB) => {
+    changes.push({ fromA, toA, fromB, toB });
+  });
+  if (changes.length > 0)
+    onEdit(path, changes, u.state.doc.toString());
 }
 function repaintEditors(app, provider) {
   app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
@@ -1415,6 +1441,93 @@ function paintRenderedWidgets(view, provider) {
     paintQuote(content, a);
   }
 }
+
+// src/anchor/repair.ts
+function mapRange(from, to, changes) {
+  let a = from;
+  let b = to;
+  for (const c of changes) {
+    const grow = c.toB - c.fromB - (c.toA - c.fromA);
+    if (c.toA <= a) {
+      a += grow;
+      b += grow;
+      continue;
+    }
+    if (c.fromA >= b)
+      continue;
+    a = a <= c.fromA ? a : Math.max(c.fromB, Math.min(a + grow, c.toB));
+    b = b >= c.toA ? b + grow : Math.max(c.fromB, Math.min(b + grow, c.toB));
+    if (b <= a)
+      return null;
+  }
+  return b > a ? { from: a, to: b } : null;
+}
+function reanchor(anchor, text, at) {
+  return { kind: "markdown", ...describe(text, at.from, at.to) };
+}
+function anchorsDiffer(a, b) {
+  return a.from !== b.from || a.to !== b.to || a.quote !== b.quote || a.prefix !== b.prefix || a.suffix !== b.suffix;
+}
+
+// src/anchor/AnchorTracker.ts
+var SETTLE_MS = 800;
+var AnchorTracker = class {
+  constructor(store) {
+    this.store = store;
+    this.pending = /* @__PURE__ */ new Map();
+  }
+  /** A note changed in the editor. */
+  onEdit(path, changes, text) {
+    if (changes.length === 0)
+      return;
+    const annotations = this.store.peek(path);
+    if (annotations.length === 0)
+      return;
+    const next = /* @__PURE__ */ new Map();
+    for (const a of annotations) {
+      if (a.anchor.kind !== "markdown")
+        continue;
+      const at = mapRange(a.anchor.from, a.anchor.to, changes);
+      if (!at)
+        continue;
+      const updated = reanchor(a.anchor, text, at);
+      if (anchorsDiffer(a.anchor, updated))
+        next.set(a.id, updated);
+    }
+    if (next.size > 0)
+      this.schedule(path, next);
+  }
+  /**
+   * A render found an anchor somewhere other than where it was stored.
+   *
+   * Writing that back means the next read takes the exact-offset path instead
+   * of searching the document again, every time, forever.
+   */
+  noteResolved(path, id, anchor, text, at) {
+    const updated = reanchor(anchor, text, at);
+    if (anchorsDiffer(anchor, updated))
+      this.schedule(path, /* @__PURE__ */ new Map([[id, updated]]));
+  }
+  schedule(path, updates) {
+    const existing = this.pending.get(path);
+    if (existing)
+      clearTimeout(existing);
+    this.pending.set(path, setTimeout(() => {
+      this.pending.delete(path);
+      void this.flush(path, updates);
+    }, SETTLE_MS));
+  }
+  async flush(path, updates) {
+    for (const [id, anchor] of updates) {
+      await this.store.update(path, id, { anchor });
+    }
+  }
+  dispose() {
+    for (const t of this.pending.values())
+      clearTimeout(t);
+    this.pending.clear();
+  }
+};
 
 // src/hosts/markdown/readingMode.ts
 function readingModeHighlighter(provider) {
@@ -1768,6 +1881,7 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
     super(...arguments);
     this.markdownHost = null;
     this.transcriptHost = null;
+    this.tracker = null;
     /**
      * Show the panel. `focus: false` is used when opening it on the user's behalf
      * — revealing a sidebar is helpful, stealing the cursor mid-sentence is not.
@@ -1894,6 +2008,19 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
   }
   setupMarkdownHost() {
     const provider = (path) => this.store.peek(path);
+    this.tracker = new AnchorTracker(this.store);
+    setEditListener((path, changes, text) => {
+      var _a;
+      return (_a = this.tracker) == null ? void 0 : _a.onEdit(path, changes, text);
+    });
+    setDriftListener((path, id, anchor, text, at) => {
+      var _a;
+      return (_a = this.tracker) == null ? void 0 : _a.noteResolved(path, id, anchor, text, at);
+    });
+    this.register(() => {
+      setEditListener(null);
+      setDriftListener(null);
+    });
     this.registerEditorExtension(annotationDecorations(provider));
     this.registerMarkdownPostProcessor(readingModeHighlighter(provider));
     this.markdownHost = new MarkdownHost(this.app, this, this.store, this.settings);
@@ -1996,9 +2123,10 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
     this.refreshReviewViews();
   }
   onunload() {
-    var _a, _b;
+    var _a, _b, _c;
     (_a = this.markdownHost) == null ? void 0 : _a.detach();
-    (_b = this.transcriptHost) == null ? void 0 : _b.detach();
+    (_b = this.tracker) == null ? void 0 : _b.dispose();
+    (_c = this.transcriptHost) == null ? void 0 : _c.detach();
     document.body.removeClass("at-style-background");
     document.body.style.removeProperty("--at-color");
   }

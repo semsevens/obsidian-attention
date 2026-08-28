@@ -13,7 +13,13 @@ import {
 } from './store/sidecar';
 import { AnnotationStore } from './store/annotationStore';
 import { MarkdownHost } from './hosts/markdown/MarkdownHost';
-import { annotationDecorations, repaintEditors } from './hosts/markdown/decorations';
+import {
+  annotationDecorations,
+  repaintEditors,
+  setEditListener,
+  setDriftListener,
+} from './hosts/markdown/decorations';
+import { AnchorTracker } from './anchor/AnchorTracker';
 import { readingModeHighlighter } from './hosts/markdown/readingMode';
 import { TranscriptHost } from './hosts/transcript/TranscriptHost';
 
@@ -23,6 +29,7 @@ export default class AttentionPlugin extends Plugin {
   store!: AnnotationStore;
   private markdownHost: MarkdownHost | null = null;
   private transcriptHost: TranscriptHost | null = null;
+  private tracker: AnchorTracker | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -167,6 +174,14 @@ export default class AttentionPlugin extends Plugin {
     // second copy means there is no stale state to invalidate.
     const provider = (path: string) => this.store.peek(path);
 
+    // Anchors follow edits made in the editor, where the changes are known
+    // exactly, rather than being searched for again afterwards.
+    this.tracker = new AnchorTracker(this.store);
+    setEditListener((path, changes, text) => this.tracker?.onEdit(path, changes, text));
+    setDriftListener((path, id, anchor, text, at) =>
+      this.tracker?.noteResolved(path, id, anchor, text, at));
+    this.register(() => { setEditListener(null); setDriftListener(null); });
+
     this.registerEditorExtension(annotationDecorations(provider));
     this.registerMarkdownPostProcessor(readingModeHighlighter(provider));
 
@@ -292,6 +307,7 @@ export default class AttentionPlugin extends Plugin {
 
   onunload() {
     this.markdownHost?.detach();
+    this.tracker?.dispose();
     this.transcriptHost?.detach();
     document.body.removeClass('at-style-background');
     document.body.style.removeProperty('--at-color');

@@ -1,9 +1,10 @@
 import { EditorView, Decoration, DecorationSet, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import { StateEffect, Extension, Range } from '@codemirror/state';
 import { App, MarkdownView, editorInfoField } from 'obsidian';
-import { Annotation, isComment } from '../../model';
+import { Annotation, MarkdownAnchor, isComment } from '../../model';
 import { resolve } from '../../anchor/textQuote';
 import { paintQuote } from '../paintQuote';
+import { Change } from '../../anchor/repair';
 
 /**
  * Highlights for Live Preview and source mode.
@@ -17,6 +18,26 @@ import { paintQuote } from '../paintQuote';
 export const refreshAnnotations = StateEffect.define<void>();
 
 export type Provider = (path: string) => readonly Annotation[];
+
+/** Told about edits so anchors can be carried through them. */
+export type EditListener = (path: string, changes: Change[], text: string) => void;
+
+/** Told when an anchor was found somewhere other than where it was stored. */
+export type DriftListener = (
+  path: string, id: string, anchor: MarkdownAnchor,
+  text: string, at: { from: number; to: number },
+) => void;
+
+let onEdit: EditListener | null = null;
+let onDrift: DriftListener | null = null;
+
+export function setEditListener(listener: EditListener | null): void {
+  onEdit = listener;
+}
+
+export function setDriftListener(listener: DriftListener | null): void {
+  onDrift = listener;
+}
 
 function build(view: EditorView, provider: Provider): DecorationSet {
   const path = view.state.field(editorInfoField, false)?.file?.path;
@@ -34,6 +55,9 @@ function build(view: EditorView, provider: Provider): DecorationSet {
     // A null resolution is an orphan — deliberately draw nothing rather than
     // guess, and let the review panel surface it for re-anchoring.
     if (!at || at.from === at.to) continue;
+    // Found somewhere else: record where, so the next read is a lookup rather
+    // than another search of the whole document.
+    if (at.how !== 'exact') onDrift?.(path, a.id, a.anchor, doc, at);
     ranges.push(
       Decoration.mark({
         class: isComment(a) ? 'at-hl at-hl-comment' : 'at-hl',
@@ -60,6 +84,7 @@ export function annotationDecorations(provider: Provider): Extension {
         const refreshed = u.transactions.some(t =>
           t.effects.some(e => e.is(refreshAnnotations)),
         );
+        if (u.docChanged) reportEdit(u);
         if (u.docChanged || u.viewportChanged || refreshed) {
           this.decorations = build(u.view, provider);
         }
@@ -67,6 +92,22 @@ export function annotationDecorations(provider: Provider): Extension {
     },
     { decorations: v => v.decorations },
   );
+}
+
+/**
+ * Hand this edit to whoever is keeping anchors current.
+ *
+ * CodeMirror knows precisely what moved; passing that on lets an anchor be
+ * carried through the change instead of hunted for afterwards.
+ */
+function reportEdit(u: ViewUpdate): void {
+  if (!onEdit) return;
+  const path = u.state.field(editorInfoField, false)?.file?.path;
+  if (!path) return;
+
+  const changes: Change[] = [];
+  u.changes.iterChanges((fromA, toA, fromB, toB) => { changes.push({ fromA, toA, fromB, toB }); });
+  if (changes.length > 0) onEdit(path, changes, u.state.doc.toString());
 }
 
 /**
