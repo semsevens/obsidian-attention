@@ -263,6 +263,29 @@ body.at-style-background .at-hl:hover {
   color: var(--text-on-accent);
 }
 
+/* Marks whose text is gone. Dimmed and struck through: still here, plainly not
+   pointing at anything. */
+.at-lost-title {
+  color: var(--text-error);
+}
+
+.at-entry-lost {
+  border-left-style: dashed;
+  border-left-color: var(--text-faint);
+  cursor: default;
+  opacity: 0.75;
+}
+
+.at-entry-lost .at-quote {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-faint);
+  color: var(--text-muted);
+}
+
+.at-entry-lost:hover {
+  opacity: 1;
+}
+
 /* Briefly ring an annotation the review panel jumped to. */
 @keyframes at-flash {
   from { box-shadow: 0 0 0 3px var(--text-accent); }

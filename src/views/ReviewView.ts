@@ -4,6 +4,9 @@ import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
 import { Annotation, isComment, lastMarked } from '../model';
 import { Sort, SORT_LABELS, sortsFor, resolveSort, sortAnnotations } from '../store/sorting';
 import { inDocumentOrder } from '../store/documentOrder';
+import { classify } from '../store/orphans';
+import { describe as describeAnchor } from '../anchor/textQuote';
+import { MarkdownView } from 'obsidian';
 import { reveal } from '../hosts/markdown/reveal';
 import { formatWhen } from '../ui/time';
 import { CommentModal } from '../ui/CommentModal';
@@ -135,14 +138,35 @@ export class ReviewView extends ItemView {
       return;
     }
 
+    // Read once, and use it for both ordering and deciding what's still
+    // findable. Prefer the open editor's buffer: cachedRead lags behind
+    // unsaved typing, and judging a mark lost against stale text is a lie.
+    const text = await this.currentText(file);
+    if (seq !== this.generation) return;
+    const { live, lost } = classify(data.annotations, text);
+
     const ordered = this.sort === 'document'
-      ? await inDocumentOrder(this.app, file, data.annotations)
-      : sortAnnotations(data.annotations.map(annotation => ({ annotation })), this.sort)
-          .map(x => x.annotation);
+      ? await inDocumentOrder(this.app, file, live, text)
+      : sortAnnotations(live.map(annotation => ({ annotation })), this.sort).map(x => x.annotation);
     if (seq !== this.generation) return;
 
-    root.createDiv('at-bucket-title').setText(`${ordered.length} in this note`);
-    for (const a of ordered) this.renderEntry(root, a, file.path);
+    if (ordered.length > 0) {
+      root.createDiv('at-bucket-title').setText(`${ordered.length} in this note`);
+      for (const a of ordered) this.renderEntry(root, a, file.path);
+    }
+
+    // Marks whose passage was edited away. Kept, and said out loud — silently
+    // dropping the words you cared about is the one thing worse than not
+    // being able to draw them.
+    if (lost.length > 0) {
+      root.createDiv('at-bucket-title at-lost-title')
+        .setText(`${lost.length} lost — the text they marked is gone`);
+      for (const a of lost) this.renderEntry(root, a, file.path, true);
+    }
+
+    if (ordered.length === 0 && lost.length === 0) {
+      this.empty(root, `Nothing marked in “${file.basename}”.`);
+    }
   }
 
   // ── All ────────────────────────────────────────────────────────────────────
@@ -174,12 +198,24 @@ export class ReviewView extends ItemView {
 
   // ── Shared ─────────────────────────────────────────────────────────────────
 
+  /** What the file says right now — from the editor if it's open, else disk. */
+  private async currentText(file: TFile): Promise<string> {
+    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+      const view = leaf.view;
+      if (view instanceof MarkdownView && view.file?.path === file.path) {
+        return view.editor.getValue();
+      }
+    }
+    try { return await this.app.vault.cachedRead(file); } catch { return ''; }
+  }
+
   private empty(root: HTMLElement, message: string): void {
     root.createDiv('at-empty').setText(message);
   }
 
-  private renderEntry(root: HTMLElement, annotation: Annotation, targetPath: string): void {
+  private renderEntry(root: HTMLElement, annotation: Annotation, targetPath: string, lost = false): void {
     const el = root.createDiv('at-entry');
+    if (lost) el.addClass('at-entry-lost');
 
     el.createDiv('at-quote').setText(annotation.anchor.quote);
     if (isComment(annotation)) {
@@ -215,14 +251,20 @@ export class ReviewView extends ItemView {
     };
     // Re-marking from the list: the passage came back to mind, which is worth
     // recording even when you aren't looking at it in the note.
-    act('＋', 'Mark again — it caught you once more',
-        () => { void this.markAgain(targetPath, annotation); });
+    if (lost) {
+      act('⚲', 'Re-attach: select the text in the note first',
+          () => { void this.reattach(targetPath, annotation); });
+    } else {
+      act('＋', 'Mark again — it caught you once more',
+          () => { void this.markAgain(targetPath, annotation); });
+    }
     act('💬', isComment(annotation) ? 'Edit comment' : 'Add a comment',
         () => this.editComment(targetPath, annotation));
     act('✕', 'Remove this mark',
         () => { void this.plugin.store.remove(targetPath, annotation.id); }, true);
 
-    el.addEventListener('click', () => { void this.jumpTo(annotation, targetPath); });
+    // A lost mark has nowhere to jump to; clicking it would do nothing.
+    if (!lost) el.addEventListener('click', () => { void this.jumpTo(annotation, targetPath); });
     el.addEventListener('contextmenu', e => this.entryMenu(e, annotation, targetPath));
   }
 
@@ -235,11 +277,40 @@ export class ReviewView extends ItemView {
       .onClick(() => { void this.markAgain(targetPath, annotation); }));
     menu.addItem(i => i.setTitle(isComment(annotation) ? 'Edit comment…' : 'Add a comment…')
       .setIcon('message-square').onClick(() => this.editComment(targetPath, annotation)));
+    menu.addItem(i => i.setTitle('Re-attach to selection').setIcon('link')
+      .onClick(() => { void this.reattach(targetPath, annotation); }));
     menu.addItem(i => i.setTitle('Copy text').setIcon('copy')
       .onClick(() => { void navigator.clipboard.writeText(annotation.anchor.quote); }));
     menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
       .onClick(() => { void this.plugin.store.remove(targetPath, annotation.id); }));
     menu.showAtMouseEvent(e);
+  }
+
+  /**
+   * Point a lost mark at whatever is selected in the note now.
+   *
+   * The mark keeps its identity — its comment, and every time it caught you —
+   * and only learns where it lives. Re-marking the passage by hand would give
+   * you a new mark and quietly lose that history.
+   */
+  private async reattach(targetPath: string, annotation: Annotation): Promise<void> {
+    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!view || view.file?.path !== targetPath || view.getMode() !== 'source') {
+      new Notice('Open the note in editing mode and select the text this should mark.');
+      return;
+    }
+    const editor = view.editor;
+    const from = editor.posToOffset(editor.getCursor('from'));
+    const to = editor.posToOffset(editor.getCursor('to'));
+    if (from === to) {
+      new Notice('Select the text this mark should attach to, then try again.');
+      return;
+    }
+
+    await this.plugin.store.update(targetPath, annotation.id, {
+      anchor: { kind: 'markdown', ...describeAnchor(editor.getValue(), from, to) },
+    });
+    new Notice(`Re-attached to “${editor.getValue().slice(from, to).slice(0, 20)}”.`);
   }
 
   private async markAgain(targetPath: string, annotation: Annotation): Promise<void> {

@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => AttentionPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian2 = require("obsidian");
@@ -450,14 +450,16 @@ function countOccurrences(before, needle) {
 }
 
 // src/store/documentOrder.ts
-async function inDocumentOrder(app, file, annotations) {
+async function inDocumentOrder(app, file, annotations, text) {
   if (annotations.length === 0)
     return [];
-  let source;
-  try {
-    source = await app.vault.cachedRead(file);
-  } catch (e) {
-    return [...annotations];
+  let source = text;
+  if (source === void 0) {
+    try {
+      source = await app.vault.cachedRead(file);
+    } catch (e) {
+      return [...annotations];
+    }
   }
   const positioned = annotations.map((a) => {
     var _a, _b;
@@ -476,6 +478,23 @@ async function inDocumentOrder(app, file, annotations) {
     return x.at - y.at;
   }).map((p) => p.a);
 }
+
+// src/store/orphans.ts
+function classify(annotations, text) {
+  const live = [];
+  const lost = [];
+  for (const a of annotations) {
+    if (a.anchor.kind !== "markdown") {
+      live.push(a);
+      continue;
+    }
+    (resolve(text, a.anchor) ? live : lost).push(a);
+  }
+  return { live, lost };
+}
+
+// src/views/ReviewView.ts
+var import_obsidian7 = require("obsidian");
 
 // src/hosts/markdown/reveal.ts
 var import_obsidian4 = require("obsidian");
@@ -694,12 +713,26 @@ var ReviewView = class extends import_obsidian6.ItemView {
       this.empty(root, `Nothing marked in \u201C${file.basename}\u201D.`);
       return;
     }
-    const ordered = this.sort === "document" ? await inDocumentOrder(this.app, file, data.annotations) : sortAnnotations(data.annotations.map((annotation) => ({ annotation })), this.sort).map((x) => x.annotation);
+    const text = await this.currentText(file);
     if (seq !== this.generation)
       return;
-    root.createDiv("at-bucket-title").setText(`${ordered.length} in this note`);
-    for (const a of ordered)
-      this.renderEntry(root, a, file.path);
+    const { live, lost } = classify(data.annotations, text);
+    const ordered = this.sort === "document" ? await inDocumentOrder(this.app, file, live, text) : sortAnnotations(live.map((annotation) => ({ annotation })), this.sort).map((x) => x.annotation);
+    if (seq !== this.generation)
+      return;
+    if (ordered.length > 0) {
+      root.createDiv("at-bucket-title").setText(`${ordered.length} in this note`);
+      for (const a of ordered)
+        this.renderEntry(root, a, file.path);
+    }
+    if (lost.length > 0) {
+      root.createDiv("at-bucket-title at-lost-title").setText(`${lost.length} lost \u2014 the text they marked is gone`);
+      for (const a of lost)
+        this.renderEntry(root, a, file.path, true);
+    }
+    if (ordered.length === 0 && lost.length === 0) {
+      this.empty(root, `Nothing marked in \u201C${file.basename}\u201D.`);
+    }
   }
   // ── All ────────────────────────────────────────────────────────────────────
   renderAll(root) {
@@ -726,12 +759,29 @@ var ReviewView = class extends import_obsidian6.ItemView {
     }
   }
   // ── Shared ─────────────────────────────────────────────────────────────────
+  /** What the file says right now — from the editor if it's open, else disk. */
+  async currentText(file) {
+    var _a;
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof import_obsidian7.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === file.path) {
+        return view.editor.getValue();
+      }
+    }
+    try {
+      return await this.app.vault.cachedRead(file);
+    } catch (e) {
+      return "";
+    }
+  }
   empty(root, message) {
     root.createDiv("at-empty").setText(message);
   }
-  renderEntry(root, annotation, targetPath) {
+  renderEntry(root, annotation, targetPath, lost = false) {
     var _a, _b;
     const el = root.createDiv("at-entry");
+    if (lost)
+      el.addClass("at-entry-lost");
     el.createDiv("at-quote").setText(annotation.anchor.quote);
     if (isComment(annotation)) {
       el.createDiv("at-body").setText((_a = annotation.body) != null ? _a : "");
@@ -759,13 +809,23 @@ var ReviewView = class extends import_obsidian6.ItemView {
         fn();
       });
     };
-    act(
-      "\uFF0B",
-      "Mark again \u2014 it caught you once more",
-      () => {
-        void this.markAgain(targetPath, annotation);
-      }
-    );
+    if (lost) {
+      act(
+        "\u26B2",
+        "Re-attach: select the text in the note first",
+        () => {
+          void this.reattach(targetPath, annotation);
+        }
+      );
+    } else {
+      act(
+        "\uFF0B",
+        "Mark again \u2014 it caught you once more",
+        () => {
+          void this.markAgain(targetPath, annotation);
+        }
+      );
+    }
     act(
       "\u{1F4AC}",
       isComment(annotation) ? "Edit comment" : "Add a comment",
@@ -779,9 +839,10 @@ var ReviewView = class extends import_obsidian6.ItemView {
       },
       true
     );
-    el.addEventListener("click", () => {
-      void this.jumpTo(annotation, targetPath);
-    });
+    if (!lost)
+      el.addEventListener("click", () => {
+        void this.jumpTo(annotation, targetPath);
+      });
     el.addEventListener("contextmenu", (e) => this.entryMenu(e, annotation, targetPath));
   }
   entryMenu(e, annotation, targetPath) {
@@ -794,6 +855,9 @@ var ReviewView = class extends import_obsidian6.ItemView {
       void this.markAgain(targetPath, annotation);
     }));
     menu.addItem((i) => i.setTitle(isComment(annotation) ? "Edit comment\u2026" : "Add a comment\u2026").setIcon("message-square").onClick(() => this.editComment(targetPath, annotation)));
+    menu.addItem((i) => i.setTitle("Re-attach to selection").setIcon("link").onClick(() => {
+      void this.reattach(targetPath, annotation);
+    }));
     menu.addItem((i) => i.setTitle("Copy text").setIcon("copy").onClick(() => {
       void navigator.clipboard.writeText(annotation.anchor.quote);
     }));
@@ -801,6 +865,32 @@ var ReviewView = class extends import_obsidian6.ItemView {
       void this.plugin.store.remove(targetPath, annotation.id);
     }));
     menu.showAtMouseEvent(e);
+  }
+  /**
+   * Point a lost mark at whatever is selected in the note now.
+   *
+   * The mark keeps its identity — its comment, and every time it caught you —
+   * and only learns where it lives. Re-marking the passage by hand would give
+   * you a new mark and quietly lose that history.
+   */
+  async reattach(targetPath, annotation) {
+    var _a;
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+    if (!view || ((_a = view.file) == null ? void 0 : _a.path) !== targetPath || view.getMode() !== "source") {
+      new import_obsidian6.Notice("Open the note in editing mode and select the text this should mark.");
+      return;
+    }
+    const editor = view.editor;
+    const from = editor.posToOffset(editor.getCursor("from"));
+    const to = editor.posToOffset(editor.getCursor("to"));
+    if (from === to) {
+      new import_obsidian6.Notice("Select the text this mark should attach to, then try again.");
+      return;
+    }
+    await this.plugin.store.update(targetPath, annotation.id, {
+      anchor: { kind: "markdown", ...describe(editor.getValue(), from, to) }
+    });
+    new import_obsidian6.Notice(`Re-attached to \u201C${editor.getValue().slice(from, to).slice(0, 20)}\u201D.`);
   }
   async markAgain(targetPath, annotation) {
     const updated = await this.plugin.store.markAgain(targetPath, annotation.id);
@@ -967,7 +1057,7 @@ ${body}` : body;
 };
 
 // src/hosts/markdown/MarkdownHost.ts
-var import_obsidian7 = require("obsidian");
+var import_obsidian8 = require("obsidian");
 
 // src/ui/SelectionPopover.ts
 var SelectionPopover = class {
@@ -1123,12 +1213,12 @@ var MarkdownHost = class {
         return;
       if (((_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim().length) != null ? _b : 0) > 0)
         return;
-      const file = (_c = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView)) == null ? void 0 : _c.file;
+      const file = (_c = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView)) == null ? void 0 : _c.file;
       if (file)
         void this.showBubble(file, hit);
     });
     this.plugin.registerDomEvent(document, "contextmenu", (e) => {
-      const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+      const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
       if (!(view == null ? void 0 : view.file) || view.getMode() !== "preview")
         return;
       if (!this.hasSomethingToOffer(view))
@@ -1183,7 +1273,7 @@ var MarkdownHost = class {
   }
   /** Selection finished: offer the swatches straight away, if asked to. */
   async onSelectionMade() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian7.MarkdownView);
+    const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
     const file = view == null ? void 0 : view.file;
     if (!view || !file)
       return;
@@ -1224,7 +1314,7 @@ var MarkdownHost = class {
     const file = view.file;
     if (!file)
       return;
-    const menu = new import_obsidian7.Menu();
+    const menu = new import_obsidian8.Menu();
     const existing = (_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl");
     if (existing instanceof HTMLElement) {
       this.addExistingItems(menu, file, existing);
@@ -1246,7 +1336,7 @@ var MarkdownHost = class {
     const source = await this.app.vault.cachedRead(file);
     const at = nthOccurrence(source, selected, this.renderedOrdinal(view, selection, selected));
     if (at < 0) {
-      new import_obsidian7.Notice("Attention: cannot anchor a selection that crosses formatting.");
+      new import_obsidian8.Notice("Attention: cannot anchor a selection that crosses formatting.");
       return null;
     }
     return { kind: "markdown", ...describe(source, at, at + selected.length) };
@@ -1294,7 +1384,7 @@ var MarkdownHost = class {
   async markAgain(targetPath, id) {
     const updated = await this.store.markAgain(targetPath, id);
     if (updated)
-      new import_obsidian7.Notice(`Marked ${updated.hits.length}\xD7 now`);
+      new import_obsidian8.Notice(`Marked ${updated.hits.length}\xD7 now`);
   }
   async editComment(file, id) {
     var _a;
@@ -1309,14 +1399,14 @@ var MarkdownHost = class {
   async mark(file, anchor, body) {
     const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
     if (repeat)
-      new import_obsidian7.Notice(`Marked ${annotation.hits.length}\xD7 now`);
+      new import_obsidian8.Notice(`Marked ${annotation.hits.length}\xD7 now`);
   }
 };
 
 // src/hosts/markdown/decorations.ts
 var import_view = require("@codemirror/view");
 var import_state = require("@codemirror/state");
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/hosts/paintQuote.ts
 function paintQuote(root, annotation, quote = annotation.anchor.quote) {
@@ -1359,7 +1449,7 @@ function setDriftListener(listener) {
 }
 function build(view, provider) {
   var _a, _b;
-  const path = (_b = (_a = view.state.field(import_obsidian8.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+  const path = (_b = (_a = view.state.field(import_obsidian9.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
   if (!path)
     return import_view.Decoration.none;
   const annotations = provider(path);
@@ -1408,7 +1498,7 @@ function reportEdit(u) {
   var _a, _b;
   if (!onEdit)
     return;
-  const path = (_b = (_a = u.state.field(import_obsidian8.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+  const path = (_b = (_a = u.state.field(import_obsidian9.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
   if (!path)
     return;
   const changes = [];
@@ -1421,7 +1511,7 @@ function reportEdit(u) {
 function repaintEditors(app, provider) {
   app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
     const view = leaf.view;
-    if (!(view instanceof import_obsidian8.MarkdownView))
+    if (!(view instanceof import_obsidian9.MarkdownView))
       return;
     const cm = view.editor.cm;
     cm == null ? void 0 : cm.dispatch({ effects: refreshAnnotations.of() });
@@ -1455,6 +1545,8 @@ function mapRange(from, to, changes) {
     }
     if (c.fromA >= b)
       continue;
+    if (c.fromA <= a && c.toA >= b)
+      return null;
     a = a <= c.fromA ? a : Math.max(c.fromB, Math.min(a + grow, c.toB));
     b = b >= c.toA ? b + grow : Math.max(c.fromB, Math.min(b + grow, c.toB));
     if (b <= a)
@@ -1544,7 +1636,7 @@ function readingModeHighlighter(provider) {
 }
 
 // src/hosts/transcript/TranscriptHost.ts
-var import_obsidian9 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 
 // src/anchor/transcriptAnchor.ts
 var TIME_TOLERANCE_S = 3;
@@ -1770,7 +1862,7 @@ var TranscriptHost = class {
     const text = txt.innerText;
     const at = text.indexOf(selected);
     if (at < 0) {
-      new import_obsidian9.Notice("Attention: select within a single transcript line.");
+      new import_obsidian10.Notice("Attention: select within a single transcript line.");
       return null;
     }
     const seg = {
@@ -1803,7 +1895,7 @@ var TranscriptHost = class {
   }
   async showMenu(e, hit) {
     var _a;
-    const menu = new import_obsidian9.Menu();
+    const menu = new import_obsidian10.Menu();
     if (hit) {
       const mediaPath = (_a = this.panelOf(hit)) == null ? void 0 : _a.mediaPath;
       const id = hit.dataset.atId;
@@ -1856,7 +1948,7 @@ var TranscriptHost = class {
   async markAgain(targetPath, id) {
     const updated = await this.store.markAgain(targetPath, id);
     if (updated)
-      new import_obsidian9.Notice(`Marked ${updated.hits.length}\xD7 now`);
+      new import_obsidian10.Notice(`Marked ${updated.hits.length}\xD7 now`);
   }
   async editComment(mediaPath, id) {
     var _a;
@@ -1871,12 +1963,12 @@ var TranscriptHost = class {
   async mark(mediaPath, anchor, body) {
     const { repeat, annotation } = await this.store.mark(mediaPath, anchor, body);
     if (repeat)
-      new import_obsidian9.Notice(`Marked ${annotation.hits.length}\xD7 now`);
+      new import_obsidian10.Notice(`Marked ${annotation.hits.length}\xD7 now`);
   }
 };
 
 // src/main.ts
-var AttentionPlugin = class extends import_obsidian10.Plugin {
+var AttentionPlugin = class extends import_obsidian11.Plugin {
   constructor() {
     super(...arguments);
     this.markdownHost = null;
@@ -1952,8 +2044,8 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
       return false;
     const targetPath = targetPathFor(file.path);
     const target = targetPath && this.app.vault.getAbstractFileByPath(targetPath);
-    if (!(target instanceof import_obsidian10.TFile)) {
-      new import_obsidian10.Notice(
+    if (!(target instanceof import_obsidian11.TFile)) {
+      new import_obsidian11.Notice(
         `Attention: \u201C${targetPath != null ? targetPath : file.name}\u201D no longer exists. Its marks are still here \u2014 delete this file to discard them.`
       );
       return false;
@@ -1990,7 +2082,7 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
   async warmOpenFiles() {
     const paths = /* @__PURE__ */ new Set();
     this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
-      const file = leaf.view instanceof import_obsidian10.MarkdownView ? leaf.view.file : null;
+      const file = leaf.view instanceof import_obsidian11.MarkdownView ? leaf.view.file : null;
       if (file)
         paths.add(file.path);
     });
@@ -2030,7 +2122,7 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
   rerenderReadingViews() {
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (view instanceof import_obsidian10.MarkdownView && view.getMode() === "preview") {
+      if (view instanceof import_obsidian11.MarkdownView && view.getMode() === "preview") {
         view.previewMode.rerender(true);
       }
     }
@@ -2070,7 +2162,7 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
     await leaf.loadIfDeferred();
     await this.app.workspace.revealLeaf(leaf);
     if (!focus) {
-      const editor = this.app.workspace.getActiveViewOfType(import_obsidian10.MarkdownView);
+      const editor = this.app.workspace.getActiveViewOfType(import_obsidian11.MarkdownView);
       if (editor)
         this.app.workspace.setActiveLeaf(editor.leaf, { focus: true });
     }
@@ -2090,10 +2182,10 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
    * is a sibling, so it travels with the folder — only a file's own rename does.
    */
   async handleRename(file, oldPath) {
-    if (!(file instanceof import_obsidian10.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian11.TFile) || isSidecarPath(file.path))
       return;
     const old = this.app.vault.getAbstractFileByPath(sidecarPathFor(oldPath));
-    if (!(old instanceof import_obsidian10.TFile))
+    if (!(old instanceof import_obsidian11.TFile))
       return;
     const nextPath = sidecarPathFor(file.path);
     if (old.path === nextPath)
@@ -2106,17 +2198,17 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
       this.index.renameFile(oldPath, file.path);
       this.refreshReviewViews();
     } catch (e) {
-      new import_obsidian10.Notice(`Attention: could not move annotations for ${file.name}`);
+      new import_obsidian11.Notice(`Attention: could not move annotations for ${file.name}`);
       console.error(e);
     }
   }
   async handleDelete(file) {
-    if (!(file instanceof import_obsidian10.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian11.TFile) || isSidecarPath(file.path))
       return;
     if (this.settings.keepOrphanedSidecars)
       return;
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
-    if (sidecar instanceof import_obsidian10.TFile)
+    if (sidecar instanceof import_obsidian11.TFile)
       await this.app.fileManager.trashFile(sidecar);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);

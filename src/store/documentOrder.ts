@@ -14,14 +14,17 @@ export async function inDocumentOrder(
   app: App,
   file: TFile,
   annotations: readonly Annotation[],
+  text?: string,
 ): Promise<Annotation[]> {
   if (annotations.length === 0) return [];
 
-  let source: string;
-  try {
-    source = await app.vault.cachedRead(file);
-  } catch {
-    return [...annotations];
+  let source = text;
+  if (source === undefined) {
+    try {
+      source = await app.vault.cachedRead(file);
+    } catch {
+      return [...annotations];
+    }
   }
 
   const positioned = annotations.map(a => ({

@@ -52,8 +52,13 @@ export function mapRange(
     // Entirely before it: untouched.
     if (c.fromA >= b) continue;
 
-    // Overlapping. Clamp each end to the edited region, so text inserted in
-    // the middle of a marked passage extends it rather than losing it.
+    // The change swallowed the whole range: the passage that was marked is
+    // gone. Following the replacement would silently re-point the mark at
+    // words nobody marked, which reads as the mark having survived.
+    if (c.fromA <= a && c.toA >= b) return null;
+
+    // Partial overlap — an edit within or across one end. Clamp to the edited
+    // region so typing inside a marked passage extends it rather than losing it.
     a = a <= c.fromA ? a : Math.max(c.fromB, Math.min(a + grow, c.toB));
     b = b >= c.toA ? b + grow : Math.max(c.fromB, Math.min(b + grow, c.toB));
     if (b <= a) return null;

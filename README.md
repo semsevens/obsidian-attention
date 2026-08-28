@@ -38,6 +38,12 @@ annotations:
 - **All** — across the vault, grouped by how long ago, with a **Resurface**
   button that brings back a handful you haven't revisited
 
+Marks follow the note as you edit it — text inserted around them shifts them,
+text typed inside them widens them. A passage deleted or replaced outright can't
+be followed, so its mark is listed as **lost** rather than quietly discarded: it
+keeps its words, its comment and every time it caught you, and can be re-attached
+to a new selection without losing any of that.
+
 Sort either view by document position, when it was last or first marked, or how
 many times it caught you. Hovering an entry reveals buttons to mark it again, comment on it, or remove it
 without going to find it first; right-click gives the full menu. The count

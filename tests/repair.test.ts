@@ -42,6 +42,13 @@ describe('mapRange', () => {
     expect(mapRange(6, 11, [edit(0, 20, '')])).toBeNull();
   });
 
+  it('reports it gone when the whole passage is replaced', () => {
+    // Following the replacement would leave the mark sitting on words nobody
+    // marked, looking for all the world like it survived the edit.
+    expect(mapRange(6, 11, [edit(6, 11, 'something else entirely')])).toBeNull();
+    expect(mapRange(6, 11, [edit(4, 15, 'wider replacement')])).toBeNull();
+  });
+
   it('applies several changes in order', () => {
     expect(mapRange(10, 15, [edit(0, 0, 'ab'), edit(0, 0, 'cd')])).toEqual({ from: 14, to: 19 });
   });
