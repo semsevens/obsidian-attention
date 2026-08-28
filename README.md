@@ -14,8 +14,9 @@ is never modified**.
 ## Using it
 
 Select text in a note and a small bar appears: **Mark** it, or 💬 to write a
-comment. Right-click a picture to mark that instead — it gets a ring rather than
-an underline, and behaves like any other mark from there. Turn that off in settings to capture only deliberately.
+comment. Click a picture for **Mark**, 💬 and 🔍 — zooming is still there, just no longer
+the only thing a click can do. A marked picture gets a ring rather than an
+underline, and behaves like any other mark from there. Turn that off in settings to capture only deliberately.
 
 Either way, right-click a selection for the full menu:
 

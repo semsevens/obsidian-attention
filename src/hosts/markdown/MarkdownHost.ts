@@ -28,6 +28,8 @@ export class MarkdownHost {
   private bubble: CommentBubble;
   /** The element right-clicked, captured before any menu is built. */
   private lastTarget: HTMLElement | null = null;
+  /** Set while re-issuing a click we intercepted, so we don't catch our own. */
+  private passingThrough = false;
 
   constructor(
     private app: App,
@@ -65,6 +67,22 @@ export class MarkdownHost {
       window.setTimeout(() => { void this.onSelectionMade(); }, 0);
     });
 
+    // Clicking a picture: offer marking as well as the zoom that would have
+    // happened. Capture phase, because Obsidian's own handler is what opens
+    // the image and it has to be headed off before it runs.
+    this.plugin.registerDomEvent(document, 'click', e => {
+      if (this.passingThrough) return;
+      const img = e.target instanceof HTMLElement ? e.target.closest('img') : null;
+      if (!(img instanceof HTMLImageElement)) return;
+      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!view?.file || !view.contentEl.contains(img)) return;
+      if ((window.getSelection()?.toString().trim().length ?? 0) > 0) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      void this.showImagePopover(view.file, img);
+    }, true);
+
     // Left-click a highlight to read its comment. Guarded on an empty
     // selection so click-dragging across a highlight still just selects text.
     this.plugin.registerDomEvent(document, 'click', e => {
@@ -94,6 +112,40 @@ export class MarkdownHost {
   detach(): void {
     this.popover.hide();
     this.bubble.hide();
+  }
+
+  /** The choice a click on a picture now offers, zoom included. */
+  private async showImagePopover(file: TFile, img: HTMLImageElement): Promise<void> {
+    const rect = img.getBoundingClientRect();
+    const id = img.dataset.atId;
+    const zoom = () => {
+      // Re-issue the click we swallowed. Obsidian's viewer is bound to the
+      // event, not to an API, so replaying it is the only way to hand the
+      // gesture back.
+      this.passingThrough = true;
+      img.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+      window.setTimeout(() => { this.passingThrough = false; }, 0);
+    };
+
+    if (!id) {
+      this.popover.showAt(rect, {
+        onMark: () => { void this.markImage(file, img, null); },
+        onComment: () => {
+          new CommentModal(this.app, '🖼 ' + (img.getAttribute('alt') || 'image'), '', body => {
+            void this.markImage(file, img, body || null);
+          }).open();
+        },
+        onZoom: zoom,
+      });
+      return;
+    }
+
+    this.popover.showAt(rect, {
+      onMarkAgain: () => { void this.markAgain(file.path, id); },
+      onComment: () => { void this.editComment(file, id); },
+      onRemove: () => { void this.store.remove(file.path, id); },
+      onZoom: zoom,
+    });
   }
 
   private async showBubble(file: TFile, el: HTMLElement): Promise<void> {

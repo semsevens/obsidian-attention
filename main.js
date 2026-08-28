@@ -1196,10 +1196,15 @@ var SelectionPopover = class {
         this.hide();
       });
     };
-    add("Mark", "Mark this passage", actions.onMark, "at-pop-btn at-pop-mark");
-    add("\u{1F4AC}", "Add a comment", actions.onComment);
+    if (actions.onMark)
+      add("Mark", "Mark this", actions.onMark, "at-pop-btn at-pop-mark");
+    if (actions.onMarkAgain)
+      add("\uFF0B", "Mark again \u2014 it caught you once more", actions.onMarkAgain);
+    add("\u{1F4AC}", "Add or edit a comment", actions.onComment);
     if (actions.onRemove)
       add("\u2715", "Remove mark", actions.onRemove);
+    if (actions.onZoom)
+      add("\u{1F50D}", "Open the picture", actions.onZoom);
     document.body.appendChild(el);
     this.el = el;
     const { width, height } = el.getBoundingClientRect();
@@ -1297,6 +1302,8 @@ var MarkdownHost = class {
     this.settings = settings;
     /** The element right-clicked, captured before any menu is built. */
     this.lastTarget = null;
+    /** Set while re-issuing a click we intercepted, so we don't catch our own. */
+    this.passingThrough = false;
     this.popover = new SelectionPopover();
     this.bubble = new CommentBubble(settings.timeFormat);
   }
@@ -1324,6 +1331,22 @@ var MarkdownHost = class {
       }, 0);
     });
     this.plugin.registerDomEvent(document, "click", (e) => {
+      var _a, _b;
+      if (this.passingThrough)
+        return;
+      const img = e.target instanceof HTMLElement ? e.target.closest("img") : null;
+      if (!(img instanceof HTMLImageElement))
+        return;
+      const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+      if (!(view == null ? void 0 : view.file) || !view.contentEl.contains(img))
+        return;
+      if (((_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim().length) != null ? _b : 0) > 0)
+        return;
+      e.preventDefault();
+      e.stopPropagation();
+      void this.showImagePopover(view.file, img);
+    }, true);
+    this.plugin.registerDomEvent(document, "click", (e) => {
       var _a, _b, _c, _d;
       const el = e.target instanceof HTMLElement ? e.target : null;
       const hit = (_a = el == null ? void 0 : el.closest(".at-hl")) != null ? _a : null;
@@ -1348,6 +1371,44 @@ var MarkdownHost = class {
   detach() {
     this.popover.hide();
     this.bubble.hide();
+  }
+  /** The choice a click on a picture now offers, zoom included. */
+  async showImagePopover(file, img) {
+    const rect = img.getBoundingClientRect();
+    const id = img.dataset.atId;
+    const zoom = () => {
+      this.passingThrough = true;
+      img.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+      window.setTimeout(() => {
+        this.passingThrough = false;
+      }, 0);
+    };
+    if (!id) {
+      this.popover.showAt(rect, {
+        onMark: () => {
+          void this.markImage(file, img, null);
+        },
+        onComment: () => {
+          new CommentModal(this.app, "\u{1F5BC} " + (img.getAttribute("alt") || "image"), "", (body) => {
+            void this.markImage(file, img, body || null);
+          }).open();
+        },
+        onZoom: zoom
+      });
+      return;
+    }
+    this.popover.showAt(rect, {
+      onMarkAgain: () => {
+        void this.markAgain(file.path, id);
+      },
+      onComment: () => {
+        void this.editComment(file, id);
+      },
+      onRemove: () => {
+        void this.store.remove(file.path, id);
+      },
+      onZoom: zoom
+    });
   }
   async showBubble(file, el) {
     const id = el.dataset.atId;
@@ -1682,7 +1743,7 @@ function paintImages(root, annotations) {
     img.toggleClass("at-img-comment", isComment(hit.annotation));
     img.dataset.atId = hit.annotation.id;
     const body = hit.annotation.body;
-    img.setAttribute("title", body && body.trim() ? body : "Marked \u2014 right-click for options");
+    img.setAttribute("title", body && body.trim() ? body : "Marked");
   }
 }
 

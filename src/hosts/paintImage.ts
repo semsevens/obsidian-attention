@@ -32,7 +32,7 @@ export function paintImages(root: HTMLElement, annotations: readonly Annotation[
     // Hover, not click: clicking an image is Obsidian's zoom, and a marked
     // picture should still zoom like any other.
     const body = hit.annotation.body;
-    img.setAttribute('title', body && body.trim() ? body : 'Marked — right-click for options');
+    img.setAttribute('title', body && body.trim() ? body : 'Marked');
   }
 }
 

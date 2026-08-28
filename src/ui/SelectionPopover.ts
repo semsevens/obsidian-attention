@@ -6,9 +6,12 @@
  * caught you — isn't something a swatch can say.
  */
 export interface PopoverActions {
-  onMark(): void;
+  onMark?(): void;
   onComment(): void;
+  onMarkAgain?(): void;
   onRemove?(): void;
+  /** Offered for pictures, where clicking would otherwise have zoomed. */
+  onZoom?(): void;
 }
 
 export class SelectionPopover {
@@ -33,9 +36,11 @@ export class SelectionPopover {
       });
     };
 
-    add('Mark', 'Mark this passage', actions.onMark, 'at-pop-btn at-pop-mark');
-    add('💬', 'Add a comment', actions.onComment);
+    if (actions.onMark) add('Mark', 'Mark this', actions.onMark, 'at-pop-btn at-pop-mark');
+    if (actions.onMarkAgain) add('＋', 'Mark again — it caught you once more', actions.onMarkAgain);
+    add('💬', 'Add or edit a comment', actions.onComment);
     if (actions.onRemove) add('✕', 'Remove mark', actions.onRemove);
+    if (actions.onZoom) add('🔍', 'Open the picture', actions.onZoom);
 
     document.body.appendChild(el);
     this.el = el;
