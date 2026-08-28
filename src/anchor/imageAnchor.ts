@@ -13,6 +13,14 @@
 /** `![[file.png]]` or `![alt](target)`, in source order. */
 const EMBED = /!\[\[([^\]]+?)\]\]|!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g;
 
+/**
+ * `![[…]]` embeds anything, not only pictures — a note transcluded into
+ * another is written exactly the same way. Treating those as images meant that
+ * marking anything inside a transcluded note anchored to the whole embed, since
+ * it was the only "image" the host file contained.
+ */
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|svg|bmp|avif|ico)(?:[?#]|$)/i;
+
 export interface ImageEmbed {
   /** The embed exactly as written, which becomes the anchor's quote. */
   text: string;
@@ -26,12 +34,12 @@ export function findImageEmbeds(source: string): ImageEmbed[] {
   const out: ImageEmbed[] = [];
   EMBED.lastIndex = 0;
   for (let m = EMBED.exec(source); m; m = EMBED.exec(source)) {
-    out.push({
-      text: m[0],
-      from: m.index,
-      to: m.index + m[0].length,
-      target: cleanTarget(m[1] ?? m[3] ?? ''),
-    });
+    const isWiki = m[1] !== undefined;
+    const target = cleanTarget(m[1] ?? m[3] ?? '');
+    // A wiki embed has to name a picture. Markdown image syntax is only ever
+    // used for one, extension or not — remote URLs frequently have none.
+    if (isWiki && !IMAGE_FILE.test(target)) continue;
+    out.push({ text: m[0], from: m.index, to: m.index + m[0].length, target });
   }
   return out;
 }

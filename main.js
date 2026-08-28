@@ -522,17 +522,17 @@ function matchLink(source, i) {
 
 // src/anchor/imageAnchor.ts
 var EMBED = /!\[\[([^\]]+?)\]\]|!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g;
+var IMAGE_FILE = /\.(png|jpe?g|gif|webp|svg|bmp|avif|ico)(?:[?#]|$)/i;
 function findImageEmbeds(source) {
   var _a, _b;
   const out = [];
   EMBED.lastIndex = 0;
   for (let m = EMBED.exec(source); m; m = EMBED.exec(source)) {
-    out.push({
-      text: m[0],
-      from: m.index,
-      to: m.index + m[0].length,
-      target: cleanTarget((_b = (_a = m[1]) != null ? _a : m[3]) != null ? _b : "")
-    });
+    const isWiki = m[1] !== void 0;
+    const target = cleanTarget((_b = (_a = m[1]) != null ? _a : m[3]) != null ? _b : "");
+    if (isWiki && !IMAGE_FILE.test(target))
+      continue;
+    out.push({ text: m[0], from: m.index, to: m.index + m[0].length, target });
   }
   return out;
 }
@@ -1513,11 +1513,65 @@ var MarkdownHost = class {
     const selection = window.getSelection();
     return ((_c = selection == null ? void 0 : selection.toString().trim().length) != null ? _c : 0) > 0 && view.contentEl.contains((_d = selection == null ? void 0 : selection.anchorNode) != null ? _d : null);
   }
-  /** Anchor whatever is selected, whichever mode the view is in. */
+  /**
+   * Anchor whatever is selected, and say which file it belongs to.
+   *
+   * Usually the note on screen — but a transcluded note is someone else's
+   * text, and a mark on it belongs to that file. Anchoring it to the host
+   * would put the mark in a note that doesn't contain the words, where it
+   * would never resolve and would vanish the moment the transclusion moved.
+   */
   async capture(view) {
-    if (view.getMode() === "source")
-      return this.captureEditor(view.editor);
-    return view.file ? this.captureRendered(view, view.file) : null;
+    const host = view.file;
+    if (!host)
+      return null;
+    const embedded = this.embeddedFileAt(this.selectionElement(), host);
+    if (embedded) {
+      const anchor2 = await this.captureInFile(embedded);
+      return anchor2 ? { anchor: anchor2, file: embedded } : null;
+    }
+    if (view.getMode() === "source") {
+      const anchor2 = this.captureEditor(view.editor);
+      return anchor2 ? { anchor: anchor2, file: host } : null;
+    }
+    const anchor = await this.captureInFile(host);
+    return anchor ? { anchor, file: host } : null;
+  }
+  /** The markdown view whose content contains `el`. */
+  viewContaining(el) {
+    if (!el)
+      return null;
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const view = leaf.view;
+      if (view instanceof import_obsidian8.MarkdownView && view.contentEl.contains(el))
+        return view;
+    }
+    return null;
+  }
+  /** The element the selection starts in. */
+  selectionElement() {
+    var _a, _b;
+    const node = (_b = (_a = window.getSelection()) == null ? void 0 : _a.anchorNode) != null ? _b : null;
+    if (!node)
+      return null;
+    return node instanceof HTMLElement ? node : node.parentElement;
+  }
+  /**
+   * The note transcluded around `el`, if any.
+   *
+   * Obsidian renders `![[a note]]` into a container carrying the link it came
+   * from, which is enough to resolve the real file.
+   */
+  embeddedFileAt(el, host) {
+    var _a, _b;
+    const container = el == null ? void 0 : el.closest(".internal-embed, .markdown-embed");
+    if (!(container instanceof HTMLElement))
+      return null;
+    const link = (_b = (_a = container.getAttribute("src")) != null ? _a : container.getAttribute("data-href")) != null ? _b : "";
+    if (!link)
+      return null;
+    const target = this.app.metadataCache.getFirstLinkpathDest(link.split("#")[0], host.path);
+    return target && target.extension === "md" ? target : null;
   }
   captureEditor(editor) {
     const from = editor.posToOffset(editor.getCursor("from"));
@@ -1528,24 +1582,21 @@ var MarkdownHost = class {
   }
   /** Selection finished: offer the swatches straight away, if asked to. */
   async onSelectionMade() {
-    const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
-    const file = view == null ? void 0 : view.file;
-    if (!view || !file)
-      return;
     const selection = window.getSelection();
     if (!selection || selection.toString().trim().length === 0)
       return;
-    if (!view.contentEl.contains(selection.anchorNode))
+    const view = this.viewContaining(this.selectionElement());
+    if (!(view == null ? void 0 : view.file))
       return;
     const rect = selection.getRangeAt(0).getBoundingClientRect();
-    const anchor = await this.capture(view);
-    if (!anchor)
+    const captured = await this.capture(view);
+    if (!captured)
       return;
     this.popover.showAt(rect, {
       onMark: () => {
-        void this.mark(file, anchor, null);
+        void this.mark(captured.file, captured.anchor, null);
       },
-      onComment: () => this.promptComment(file, anchor, "")
+      onComment: () => this.promptComment(captured.file, captured.anchor, "")
     });
   }
   // ── Editing modes ──────────────────────────────────────────────────────────
@@ -1582,15 +1633,15 @@ var MarkdownHost = class {
     } else if (img instanceof HTMLImageElement) {
       this.addImageItems(menu, file, img);
     } else {
-      const anchor = await this.captureRendered(view, file);
-      if (!anchor)
+      const captured = await this.capture(view);
+      if (!captured)
         return;
-      this.addCreateItems(menu, file, anchor);
+      this.addCreateItems(menu, captured.file, captured.anchor);
     }
     menu.showAtMouseEvent(e);
   }
-  /** Locate a reading-mode selection in the source by ordinal. */
-  async captureRendered(view, file) {
+  /** Locate a rendered selection in a file's source by ordinal. */
+  async captureInFile(file) {
     var _a;
     const selection = window.getSelection();
     const selected = (_a = selection == null ? void 0 : selection.toString()) != null ? _a : "";
@@ -1598,7 +1649,7 @@ var MarkdownHost = class {
       return null;
     const source = await this.app.vault.cachedRead(file);
     const plain = project(source);
-    const at = nthOccurrence(plain.text, selected, this.renderedOrdinal(view, selection, selected));
+    const at = nthOccurrence(plain.text, selected, this.renderedOrdinal(selection, selected));
     if (at < 0) {
       new import_obsidian8.Notice("Attention: could not find that selection in the note.");
       return null;
@@ -1616,12 +1667,14 @@ var MarkdownHost = class {
    * once — only one visible — so counting across it sees the document twice and
    * asks for an occurrence that doesn't exist.
    */
-  renderedOrdinal(view, selection, selected) {
-    var _a;
+  renderedOrdinal(selection, selected) {
+    var _a, _b;
     const sel = selection.getRangeAt(0);
     const node = sel.startContainer;
     const el = node instanceof HTMLElement ? node : node.parentElement;
-    const container = (_a = el == null ? void 0 : el.closest(".markdown-preview-view")) != null ? _a : view.contentEl;
+    const container = (_b = (_a = el == null ? void 0 : el.closest(".markdown-embed-content")) != null ? _a : el == null ? void 0 : el.closest(".markdown-preview-view")) != null ? _b : el == null ? void 0 : el.closest(".cm-content");
+    if (!container)
+      return 0;
     const before = sel.cloneRange();
     before.selectNodeContents(container);
     before.setEnd(sel.startContainer, sel.startOffset);

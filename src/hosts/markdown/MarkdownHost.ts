@@ -174,10 +174,63 @@ export class MarkdownHost {
     );
   }
 
-  /** Anchor whatever is selected, whichever mode the view is in. */
-  private async capture(view: MarkdownView): Promise<MarkdownAnchor | null> {
-    if (view.getMode() === 'source') return this.captureEditor(view.editor);
-    return view.file ? this.captureRendered(view, view.file) : null;
+  /**
+   * Anchor whatever is selected, and say which file it belongs to.
+   *
+   * Usually the note on screen — but a transcluded note is someone else's
+   * text, and a mark on it belongs to that file. Anchoring it to the host
+   * would put the mark in a note that doesn't contain the words, where it
+   * would never resolve and would vanish the moment the transclusion moved.
+   */
+  private async capture(view: MarkdownView): Promise<{ anchor: MarkdownAnchor; file: TFile } | null> {
+    const host = view.file;
+    if (!host) return null;
+
+    const embedded = this.embeddedFileAt(this.selectionElement(), host);
+    if (embedded) {
+      const anchor = await this.captureInFile(embedded);
+      return anchor ? { anchor, file: embedded } : null;
+    }
+
+    if (view.getMode() === 'source') {
+      const anchor = this.captureEditor(view.editor);
+      return anchor ? { anchor, file: host } : null;
+    }
+    const anchor = await this.captureInFile(host);
+    return anchor ? { anchor, file: host } : null;
+  }
+
+  /** The markdown view whose content contains `el`. */
+  private viewContaining(el: HTMLElement | null): MarkdownView | null {
+    if (!el) return null;
+    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
+      const view = leaf.view;
+      if (view instanceof MarkdownView && view.contentEl.contains(el)) return view;
+    }
+    return null;
+  }
+
+  /** The element the selection starts in. */
+  private selectionElement(): HTMLElement | null {
+    const node = window.getSelection()?.anchorNode ?? null;
+    if (!node) return null;
+    return node instanceof HTMLElement ? node : node.parentElement;
+  }
+
+  /**
+   * The note transcluded around `el`, if any.
+   *
+   * Obsidian renders `![[a note]]` into a container carrying the link it came
+   * from, which is enough to resolve the real file.
+   */
+  private embeddedFileAt(el: HTMLElement | null, host: TFile): TFile | null {
+    const container = el?.closest('.internal-embed, .markdown-embed');
+    if (!(container instanceof HTMLElement)) return null;
+    const link = container.getAttribute('src') ?? container.getAttribute('data-href') ?? '';
+    if (!link) return null;
+    const target = this.app.metadataCache.getFirstLinkpathDest(link.split('#')[0], host.path);
+    // Only notes: an embedded picture has no text to anchor into.
+    return target && target.extension === 'md' ? target : null;
   }
 
   private captureEditor(editor: Editor): MarkdownAnchor | null {
@@ -189,21 +242,22 @@ export class MarkdownHost {
 
   /** Selection finished: offer the swatches straight away, if asked to. */
   private async onSelectionMade(): Promise<void> {
-    const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-    const file = view?.file;
-    if (!view || !file) return;
-
     const selection = window.getSelection();
     if (!selection || selection.toString().trim().length === 0) return;
-    if (!view.contentEl.contains(selection.anchorNode)) return;
+
+    // Find the note the selection is physically in, rather than whichever view
+    // happens to be active — the sidebar can hold focus, and a split pane you
+    // selected in need not be the active one.
+    const view = this.viewContaining(this.selectionElement());
+    if (!view?.file) return;
 
     const rect = selection.getRangeAt(0).getBoundingClientRect();
-    const anchor = await this.capture(view);
-    if (!anchor) return;
+    const captured = await this.capture(view);
+    if (!captured) return;
 
     this.popover.showAt(rect, {
-      onMark: () => { void this.mark(file, anchor, null); },
-      onComment: () => this.promptComment(file, anchor, ''),
+      onMark: () => { void this.mark(captured.file, captured.anchor, null); },
+      onComment: () => this.promptComment(captured.file, captured.anchor, ''),
     });
   }
 
@@ -244,15 +298,15 @@ export class MarkdownHost {
     } else if (img instanceof HTMLImageElement) {
       this.addImageItems(menu, file, img);
     } else {
-      const anchor = await this.captureRendered(view, file);
-      if (!anchor) return;
-      this.addCreateItems(menu, file, anchor);
+      const captured = await this.capture(view);
+      if (!captured) return;
+      this.addCreateItems(menu, captured.file, captured.anchor);
     }
     menu.showAtMouseEvent(e);
   }
 
-  /** Locate a reading-mode selection in the source by ordinal. */
-  private async captureRendered(view: MarkdownView, file: TFile): Promise<MarkdownAnchor | null> {
+  /** Locate a rendered selection in a file's source by ordinal. */
+  private async captureInFile(file: TFile): Promise<MarkdownAnchor | null> {
     const selection = window.getSelection();
     const selected = selection?.toString() ?? '';
     if (!selection || selected.trim().length === 0) return null;
@@ -263,7 +317,7 @@ export class MarkdownHost {
     // refuse any selection containing emphasis, a link or a highlight, which in
     // a real note is most of them.
     const plain = project(source);
-    const at = nthOccurrence(plain.text, selected, this.renderedOrdinal(view, selection, selected));
+    const at = nthOccurrence(plain.text, selected, this.renderedOrdinal(selection, selected));
     if (at < 0) {
       new Notice('Attention: could not find that selection in the note.');
       return null;
@@ -281,11 +335,17 @@ export class MarkdownHost {
    * once — only one visible — so counting across it sees the document twice and
    * asks for an occurrence that doesn't exist.
    */
-  private renderedOrdinal(view: MarkdownView, selection: Selection, selected: string): number {
+  private renderedOrdinal(selection: Selection, selected: string): number {
     const sel = selection.getRangeAt(0);
     const node = sel.startContainer;
     const el = node instanceof HTMLElement ? node : node.parentElement;
-    const container = el?.closest('.markdown-preview-view') ?? view.contentEl;
+    // Count within the transclusion when inside one: its text is a file of its
+    // own, and occurrences elsewhere on the page are not part of it.
+    const container =
+      el?.closest('.markdown-embed-content') ??
+      el?.closest('.markdown-preview-view') ??
+      el?.closest('.cm-content');
+    if (!container) return 0;
 
     const before = sel.cloneRange();
     before.selectNodeContents(container);

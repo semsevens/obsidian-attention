@@ -40,6 +40,22 @@ describe('findImageEmbeds', () => {
       .toBe('https://x.test/%E0%A4.png');
   });
 
+  it('ignores a transcluded note, which is written like an image embed', () => {
+    // `![[some note]]` embeds a note. Counting it as an image meant marking
+    // anything inside a transclusion anchored to the whole embed.
+    expect(findImageEmbeds('![[raw/x/2026-08-26 Russell - 万字长文]]')).toEqual([]);
+    expect(findImageEmbeds('![[另一篇笔记.md]]')).toEqual([]);
+    expect(findImageEmbeds('![[Excalidraw/图.md#^abc]]')).toEqual([]);
+    // …but a picture with the same syntax still counts.
+    expect(findImageEmbeds('![[photo.png]]')).toHaveLength(1);
+    expect(findImageEmbeds('![[a/b/图.jpeg|300]]')).toHaveLength(1);
+  });
+
+  it('trusts markdown image syntax without an extension', () => {
+    // Remote images very often have no extension in the path.
+    expect(findImageEmbeds('![](https://mmbiz.qpic.cn/a/640?wx_fmt=jpeg)')).toHaveLength(1);
+  });
+
   it('ignores links, which are not embeds', () => {
     expect(findImageEmbeds('see [the docs](https://x.test) and [[a note]]')).toEqual([]);
   });
