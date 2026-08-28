@@ -449,6 +449,186 @@ function countOccurrences(before, needle) {
   return n;
 }
 
+// src/anchor/plainText.ts
+var WRAPPERS = ["***", "___", "**", "__", "~~", "==", "*", "_", "`"];
+function project(source) {
+  let text = "";
+  const map = [];
+  let i = 0;
+  const take = (n) => {
+    for (let k = 0; k < n; k++) {
+      text += source[i];
+      map.push(i);
+      i++;
+    }
+  };
+  while (i < source.length) {
+    if (source.startsWith("![", i)) {
+      const close = matchLink(source, i + 1);
+      if (close) {
+        i = close.end;
+        continue;
+      }
+    }
+    if (source[i] === "[") {
+      const link = matchLink(source, i);
+      if (link) {
+        i++;
+        take(link.labelEnd - i);
+        i = link.end;
+        continue;
+      }
+    }
+    const wrapper = WRAPPERS.find((w) => source.startsWith(w, i));
+    if (wrapper) {
+      i += wrapper.length;
+      continue;
+    }
+    take(1);
+  }
+  return { text, map };
+}
+function strip(source) {
+  return project(source).text;
+}
+function toSource(p, from, to) {
+  if (from < 0 || to > p.text.length || to <= from)
+    return null;
+  return { from: p.map[from], to: p.map[to - 1] + 1 };
+}
+function matchLink(source, i) {
+  if (source[i] !== "[")
+    return null;
+  let depth = 0;
+  for (let k = i; k < source.length; k++) {
+    if (source[k] === "[")
+      depth++;
+    else if (source[k] === "]") {
+      depth--;
+      if (depth === 0) {
+        if (source[k + 1] !== "(")
+          return null;
+        const close = source.indexOf(")", k + 2);
+        if (close < 0)
+          return null;
+        return { labelEnd: k, end: close + 1 };
+      }
+    } else if (source[k] === "\n" && depth > 0) {
+      return null;
+    }
+  }
+  return null;
+}
+
+// src/anchor/imageAnchor.ts
+var EMBED = /!\[\[([^\]]+?)\]\]|!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g;
+function findImageEmbeds(source) {
+  var _a, _b;
+  const out = [];
+  EMBED.lastIndex = 0;
+  for (let m = EMBED.exec(source); m; m = EMBED.exec(source)) {
+    out.push({
+      text: m[0],
+      from: m.index,
+      to: m.index + m[0].length,
+      target: cleanTarget((_b = (_a = m[1]) != null ? _a : m[3]) != null ? _b : "")
+    });
+  }
+  return out;
+}
+function cleanTarget(raw) {
+  const withoutOptions = raw.split("|")[0].trim();
+  try {
+    return decodeURIComponent(withoutOptions);
+  } catch (e) {
+    return withoutOptions;
+  }
+}
+function embedBySurroundings(source, embeds, before, after, offsetOfPlain, plainText) {
+  if (embeds.length === 0)
+    return null;
+  if (embeds.length === 1)
+    return embeds[0];
+  const trimmedAfter = after.trim();
+  if (trimmedAfter.length >= 2) {
+    const at = plainText.indexOf(trimmedAfter);
+    if (at >= 0) {
+      const cut = offsetOfPlain(at);
+      const before_ = embeds.filter((e) => e.to <= cut);
+      if (before_.length > 0)
+        return before_[before_.length - 1];
+    }
+  }
+  const trimmedBefore = before.trim();
+  if (trimmedBefore.length >= 2) {
+    const at = plainText.lastIndexOf(trimmedBefore);
+    if (at >= 0) {
+      const cut = offsetOfPlain(Math.min(at + trimmedBefore.length, plainText.length - 1));
+      const after_ = embeds.filter((e) => e.from >= cut);
+      if (after_.length > 0)
+        return after_[0];
+    }
+  }
+  return null;
+}
+function imageTargetOf(quote) {
+  const found = findImageEmbeds(quote);
+  return found.length === 1 && found[0].text === quote.trim() ? found[0].target : null;
+}
+function isImageQuote(quote) {
+  return imageTargetOf(quote) !== null;
+}
+function imageMatches(src, target) {
+  var _a;
+  if (!src || !target)
+    return false;
+  const decoded = safeDecode(src);
+  if (decoded.includes(target))
+    return true;
+  const name = (_a = target.split("/").pop()) != null ? _a : target;
+  return name.length > 0 && decoded.includes(name);
+}
+function srcHint(src) {
+  var _a;
+  const withoutQuery = safeDecode(src).split(/[?#]/)[0];
+  const tail = (_a = withoutQuery.split("/").filter(Boolean).pop()) != null ? _a : "";
+  return tail.length >= 4 ? tail : "";
+}
+function safeDecode(url) {
+  try {
+    return decodeURIComponent(url);
+  } catch (e) {
+    return url;
+  }
+}
+
+// src/anchor/resolveAnchor.ts
+function resolveMarkdown(text, anchor) {
+  const direct = resolve(text, anchor);
+  if (direct)
+    return direct;
+  if (!isImageQuote(anchor.quote))
+    return null;
+  const embeds = findImageEmbeds(text);
+  if (embeds.length === 0)
+    return null;
+  const plain = project(text);
+  const found = embedBySurroundings(
+    text,
+    embeds,
+    anchor.prefix,
+    anchor.suffix,
+    (i) => {
+      var _a;
+      return (_a = plain.map[i]) != null ? _a : 0;
+    },
+    plain.text
+  );
+  if (!found)
+    return null;
+  return { from: found.from, to: found.to, how: "context" };
+}
+
 // src/store/documentOrder.ts
 async function inDocumentOrder(app, file, annotations, text) {
   if (annotations.length === 0)
@@ -465,7 +645,7 @@ async function inDocumentOrder(app, file, annotations, text) {
     var _a, _b;
     return {
       a,
-      at: a.anchor.kind === "markdown" ? (_b = (_a = resolve(source, a.anchor)) == null ? void 0 : _a.from) != null ? _b : null : null
+      at: a.anchor.kind === "markdown" ? (_b = (_a = resolveMarkdown(source, a.anchor)) == null ? void 0 : _a.from) != null ? _b : null : null
     };
   });
   return positioned.sort((x, y) => {
@@ -488,7 +668,7 @@ function classify(annotations, text) {
       live.push(a);
       continue;
     }
-    (resolve(text, a.anchor) ? live : lost).push(a);
+    (resolveMarkdown(text, a.anchor) ? live : lost).push(a);
   }
   return { live, lost };
 }
@@ -541,7 +721,7 @@ async function revealInMarkdown(app, file, annotation) {
     if (annotation.anchor.kind !== "markdown")
       return;
     const editor = view.editor;
-    const at = resolve(editor.getValue(), annotation.anchor);
+    const at = resolveMarkdown(editor.getValue(), annotation.anchor);
     if (!at)
       return;
     const from = editor.offsetToPos(at.from);
@@ -1059,123 +1239,6 @@ ${body}` : body;
 // src/hosts/markdown/MarkdownHost.ts
 var import_obsidian8 = require("obsidian");
 
-// src/anchor/plainText.ts
-var WRAPPERS = ["***", "___", "**", "__", "~~", "==", "*", "_", "`"];
-function project(source) {
-  let text = "";
-  const map = [];
-  let i = 0;
-  const take = (n) => {
-    for (let k = 0; k < n; k++) {
-      text += source[i];
-      map.push(i);
-      i++;
-    }
-  };
-  while (i < source.length) {
-    if (source.startsWith("![", i)) {
-      const close = matchLink(source, i + 1);
-      if (close) {
-        i = close.end;
-        continue;
-      }
-    }
-    if (source[i] === "[") {
-      const link = matchLink(source, i);
-      if (link) {
-        i++;
-        take(link.labelEnd - i);
-        i = link.end;
-        continue;
-      }
-    }
-    const wrapper = WRAPPERS.find((w) => source.startsWith(w, i));
-    if (wrapper) {
-      i += wrapper.length;
-      continue;
-    }
-    take(1);
-  }
-  return { text, map };
-}
-function strip(source) {
-  return project(source).text;
-}
-function toSource(p, from, to) {
-  if (from < 0 || to > p.text.length || to <= from)
-    return null;
-  return { from: p.map[from], to: p.map[to - 1] + 1 };
-}
-function matchLink(source, i) {
-  if (source[i] !== "[")
-    return null;
-  let depth = 0;
-  for (let k = i; k < source.length; k++) {
-    if (source[k] === "[")
-      depth++;
-    else if (source[k] === "]") {
-      depth--;
-      if (depth === 0) {
-        if (source[k + 1] !== "(")
-          return null;
-        const close = source.indexOf(")", k + 2);
-        if (close < 0)
-          return null;
-        return { labelEnd: k, end: close + 1 };
-      }
-    } else if (source[k] === "\n" && depth > 0) {
-      return null;
-    }
-  }
-  return null;
-}
-
-// src/anchor/imageAnchor.ts
-var EMBED = /!\[\[([^\]]+?)\]\]|!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g;
-function findImageEmbeds(source) {
-  var _a, _b;
-  const out = [];
-  EMBED.lastIndex = 0;
-  for (let m = EMBED.exec(source); m; m = EMBED.exec(source)) {
-    out.push({
-      text: m[0],
-      from: m.index,
-      to: m.index + m[0].length,
-      target: cleanTarget((_b = (_a = m[1]) != null ? _a : m[3]) != null ? _b : "")
-    });
-  }
-  return out;
-}
-function cleanTarget(raw) {
-  const withoutOptions = raw.split("|")[0].trim();
-  try {
-    return decodeURIComponent(withoutOptions);
-  } catch (e) {
-    return withoutOptions;
-  }
-}
-function imageTargetOf(quote) {
-  const found = findImageEmbeds(quote);
-  return found.length === 1 && found[0].text === quote.trim() ? found[0].target : null;
-}
-function imageMatches(src, target) {
-  var _a;
-  if (!src || !target)
-    return false;
-  const decoded = safeDecode(src);
-  if (decoded.includes(target))
-    return true;
-  const name = (_a = target.split("/").pop()) != null ? _a : target;
-  return name.length > 0 && decoded.includes(name);
-}
-function safeDecode(url) {
-  try {
-    return decodeURIComponent(url);
-  } catch (e) {
-    return url;
-  }
-}
-
 // src/ui/SelectionPopover.ts
 var SelectionPopover = class {
   constructor() {
@@ -1613,21 +1676,60 @@ var MarkdownHost = class {
    * same picture used twice is told apart by order among its own duplicates.
    */
   async markImage(file, img, body) {
-    var _a;
+    var _a, _b;
     const source = await this.app.vault.cachedRead(file);
-    const src = (_a = img.getAttribute("src")) != null ? _a : "";
-    const candidates = findImageEmbeds(source).filter((e) => imageMatches(src, e.target));
-    if (candidates.length === 0) {
+    const embeds = findImageEmbeds(source);
+    if (embeds.length === 0) {
       new import_obsidian8.Notice("Attention: could not find that image in the note.");
       return;
     }
-    let embed = candidates[0];
-    if (candidates.length > 1) {
+    const src = (_a = img.getAttribute("src")) != null ? _a : "";
+    const byTarget = embeds.filter((e) => imageMatches(src, e.target));
+    let embed = (_b = byTarget[0]) != null ? _b : null;
+    if (byTarget.length > 1) {
       const same = Array.from(document.querySelectorAll("img")).filter((other) => other.getAttribute("src") === src);
-      const ordinal = same.indexOf(img);
-      embed = candidates[Math.min(Math.max(ordinal, 0), candidates.length - 1)];
+      embed = byTarget[Math.min(Math.max(same.indexOf(img), 0), byTarget.length - 1)];
     }
-    await this.mark(file, { kind: "markdown", ...describe(source, embed.from, embed.to) }, body);
+    if (!embed) {
+      const plain = project(source);
+      embed = embedBySurroundings(
+        source,
+        embeds,
+        this.textAround(img, "before"),
+        this.textAround(img, "after"),
+        (i) => {
+          var _a2;
+          return (_a2 = plain.map[i]) != null ? _a2 : 0;
+        },
+        plain.text
+      );
+    }
+    if (!embed) {
+      new import_obsidian8.Notice("Attention: could not tell which image in the note that is.");
+      return;
+    }
+    await this.mark(file, {
+      kind: "markdown",
+      ...describe(source, embed.from, embed.to),
+      imageHint: srcHint(src)
+    }, body);
+  }
+  /** A little of the rendered text immediately before or after an image. */
+  textAround(img, side) {
+    var _a;
+    const block = (_a = img.closest("p, li, blockquote, div")) != null ? _a : img.parentElement;
+    if (!block)
+      return "";
+    const range = document.createRange();
+    if (side === "after") {
+      range.setStartAfter(img);
+      range.setEnd(block, block.childNodes.length);
+    } else {
+      range.setStart(block, 0);
+      range.setEndBefore(img);
+    }
+    const text = range.toString();
+    return side === "after" ? text.slice(0, 40) : text.slice(-40);
   }
   promptComment(file, anchor, initial) {
     new CommentModal(this.app, anchor.quote, initial, (body) => {
@@ -1721,22 +1823,23 @@ function isInsideHighlight(node) {
 
 // src/hosts/paintImage.ts
 function paintImages(root, annotations) {
-  var _a;
+  var _a, _b;
   const targets = [];
   for (const a of annotations) {
     if (a.anchor.kind !== "markdown")
       continue;
     const target = imageTargetOf(a.anchor.quote);
     if (target)
-      targets.push({ target, annotation: a });
+      targets.push({ target, hint: (_a = a.anchor.imageHint) != null ? _a : "", annotation: a });
   }
   if (targets.length === 0)
     return;
   for (const img of Array.from(root.querySelectorAll("img"))) {
     if (!(img instanceof HTMLImageElement))
       continue;
-    const src = (_a = img.getAttribute("src")) != null ? _a : "";
-    const hit = targets.find((t) => imageMatches(src, t.target));
+    const src = (_b = img.getAttribute("src")) != null ? _b : "";
+    const hint = srcHint(src);
+    const hit = targets.find((t) => imageMatches(src, t.target) || t.hint && t.hint === hint);
     if (!hit)
       continue;
     img.addClass("at-img");
@@ -1770,7 +1873,7 @@ function build(view, provider) {
   for (const a of annotations) {
     if (a.anchor.kind !== "markdown")
       continue;
-    const at = resolve(doc, a.anchor);
+    const at = resolveMarkdown(doc, a.anchor);
     if (!at || at.from === at.to)
       continue;
     if (at.how !== "exact")

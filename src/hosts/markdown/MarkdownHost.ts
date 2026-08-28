@@ -2,7 +2,9 @@ import { App, Editor, Menu, MarkdownView, MarkdownFileInfo, Notice, Plugin, TFil
 import { MarkdownAnchor } from '../../model';
 import { describe, nthOccurrence, countOccurrences } from '../../anchor/textQuote';
 import { project, toSource } from '../../anchor/plainText';
-import { findImageEmbeds, imageMatches } from '../../anchor/imageAnchor';
+import {
+  findImageEmbeds, imageMatches, embedBySurroundings, srcHint, ImageEmbed,
+} from '../../anchor/imageAnchor';
 import { AnnotationStore } from '../../store/annotationStore';
 import { SelectionPopover } from '../../ui/SelectionPopover';
 import { CommentBubble } from '../../ui/CommentBubble';
@@ -364,23 +366,62 @@ export class MarkdownHost {
    */
   private async markImage(file: TFile, img: HTMLImageElement, body: string | null): Promise<void> {
     const source = await this.app.vault.cachedRead(file);
-    const src = img.getAttribute('src') ?? '';
-    const candidates = findImageEmbeds(source).filter(e => imageMatches(src, e.target));
-
-    if (candidates.length === 0) {
+    const embeds = findImageEmbeds(source);
+    if (embeds.length === 0) {
       new Notice('Attention: could not find that image in the note.');
       return;
     }
 
-    let embed = candidates[0];
-    if (candidates.length > 1) {
+    // First try what the picture points at. When that works it is exact.
+    const src = img.getAttribute('src') ?? '';
+    const byTarget = embeds.filter(e => imageMatches(src, e.target));
+    let embed: ImageEmbed | null = byTarget[0] ?? null;
+    if (byTarget.length > 1) {
       const same = Array.from(document.querySelectorAll('img'))
         .filter(other => other.getAttribute('src') === src);
-      const ordinal = same.indexOf(img);
-      embed = candidates[Math.min(Math.max(ordinal, 0), candidates.length - 1)];
+      embed = byTarget[Math.min(Math.max(same.indexOf(img), 0), byTarget.length - 1)];
     }
 
-    await this.mark(file, { kind: 'markdown', ...describe(source, embed.from, embed.to) }, body);
+    // Otherwise fall back to where it sits. The rendered src is often nothing
+    // like the source — a vault that caches remote pictures locally serves an
+    // app:// path, a drawing plugin serves a blob — but the words around a
+    // picture are the same on screen as in the file.
+    if (!embed) {
+      const plain = project(source);
+      embed = embedBySurroundings(
+        source, embeds,
+        this.textAround(img, 'before'),
+        this.textAround(img, 'after'),
+        i => plain.map[i] ?? 0,
+        plain.text,
+      );
+    }
+
+    if (!embed) {
+      new Notice('Attention: could not tell which image in the note that is.');
+      return;
+    }
+    await this.mark(file, {
+      kind: 'markdown',
+      ...describe(source, embed.from, embed.to),
+      imageHint: srcHint(src),
+    }, body);
+  }
+
+  /** A little of the rendered text immediately before or after an image. */
+  private textAround(img: HTMLImageElement, side: 'before' | 'after'): string {
+    const block = img.closest('p, li, blockquote, div') ?? img.parentElement;
+    if (!block) return '';
+    const range = document.createRange();
+    if (side === 'after') {
+      range.setStartAfter(img);
+      range.setEnd(block, block.childNodes.length);
+    } else {
+      range.setStart(block, 0);
+      range.setEndBefore(img);
+    }
+    const text = range.toString();
+    return side === 'after' ? text.slice(0, 40) : text.slice(-40);
   }
 
   private promptComment(file: TFile, anchor: MarkdownAnchor, initial: string): void {

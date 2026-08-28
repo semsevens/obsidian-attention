@@ -29,7 +29,19 @@ export interface TranscriptAnchor extends QuoteContext {
  * A spot inside a markdown file. Offsets are a *hint* — the file is editable,
  * so on conflict the quote wins and the offsets get rewritten.
  */
-export type MarkdownAnchor = TextAnchor & { kind: 'markdown' };
+export type MarkdownAnchor = TextAnchor & {
+  kind: 'markdown';
+  /**
+   * For an image: something stable from the `src` it was rendered with.
+   *
+   * The embed in the file and the picture on screen need not agree. A tool that
+   * caches remote images locally serves an `app://` path bearing no relation to
+   * the URL in the note, so the embed alone can't find the drawn image again.
+   * Recorded when the mark is made, and used only as a hint — if it stops
+   * matching, the embed still identifies the mark.
+   */
+  imageHint?: string;
+};
 
 export type Anchor = TranscriptAnchor | MarkdownAnchor;
 

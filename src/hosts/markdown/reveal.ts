@@ -1,6 +1,6 @@
 import { App, MarkdownView, TFile } from 'obsidian';
 import { Annotation } from '../../model';
-import { resolve } from '../../anchor/textQuote';
+import { resolveMarkdown } from '../../anchor/resolveAnchor';
 
 /**
  * Go to an annotation: open its file and put the passage in front of you.
@@ -63,7 +63,7 @@ async function revealInMarkdown(
   if (view.getMode() === 'source') {
     if (annotation.anchor.kind !== 'markdown') return;
     const editor = view.editor;
-    const at = resolve(editor.getValue(), annotation.anchor);
+    const at = resolveMarkdown(editor.getValue(), annotation.anchor);
     if (!at) return;
     const from = editor.offsetToPos(at.from);
     const to = editor.offsetToPos(at.to);

@@ -1,5 +1,5 @@
 import { Annotation, isComment } from '../model';
-import { imageTargetOf, imageMatches } from '../anchor/imageAnchor';
+import { imageTargetOf, imageMatches, srcHint } from '../anchor/imageAnchor';
 
 /**
  * Outline the pictures that have been marked.
@@ -12,18 +12,22 @@ import { imageTargetOf, imageMatches } from '../anchor/imageAnchor';
  * Idempotent, like the text painter: an image already marked is left alone.
  */
 export function paintImages(root: HTMLElement, annotations: readonly Annotation[]): void {
-  const targets: { target: string; annotation: Annotation }[] = [];
+  const targets: { target: string; hint: string; annotation: Annotation }[] = [];
   for (const a of annotations) {
     if (a.anchor.kind !== 'markdown') continue;
     const target = imageTargetOf(a.anchor.quote);
-    if (target) targets.push({ target, annotation: a });
+    if (target) targets.push({ target, hint: a.anchor.imageHint ?? '', annotation: a });
   }
   if (targets.length === 0) return;
 
   for (const img of Array.from(root.querySelectorAll('img'))) {
     if (!(img instanceof HTMLImageElement)) continue;
     const src = img.getAttribute('src') ?? '';
-    const hit = targets.find(t => imageMatches(src, t.target));
+    const hint = srcHint(src);
+    // Either the embed points at this picture, or this is the picture we saw
+    // when the mark was made. Both are needed: the two disagree whenever
+    // another plugin rewrites what gets served.
+    const hit = targets.find(t => imageMatches(src, t.target) || (t.hint && t.hint === hint));
     if (!hit) continue;
 
     img.addClass('at-img');

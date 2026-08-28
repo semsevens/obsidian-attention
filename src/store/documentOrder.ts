@@ -1,6 +1,6 @@
 import { App, TFile } from 'obsidian';
 import { Annotation } from '../model';
-import { resolve } from '../anchor/textQuote';
+import { resolveMarkdown } from '../anchor/resolveAnchor';
 
 /**
  * Sort a file's annotations the way they appear in the file.
@@ -29,7 +29,7 @@ export async function inDocumentOrder(
 
   const positioned = annotations.map(a => ({
     a,
-    at: a.anchor.kind === 'markdown' ? resolve(source, a.anchor)?.from ?? null : null,
+    at: a.anchor.kind === 'markdown' ? resolveMarkdown(source, a.anchor)?.from ?? null : null,
   }));
 
   return positioned

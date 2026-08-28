@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  findImageEmbeds, imageTargetOf, isImageQuote, imageMatches,
+  findImageEmbeds, imageTargetOf, isImageQuote, imageMatches, embedBySurroundings,
 } from '../src/anchor/imageAnchor';
+import { project } from '../src/anchor/plainText';
 
 describe('findImageEmbeds', () => {
   it('finds a vault embed and a markdown image', () => {
@@ -83,5 +84,55 @@ describe('imageMatches', () => {
 
   it('survives a URL that will not decode', () => {
     expect(imageMatches('app://abc/%E0%A4%A.png', 'photo.png')).toBe(false);
+  });
+});
+
+describe('embedBySurroundings', () => {
+  // Matching on src fails whenever something rewrites it — a vault that caches
+  // remote pictures locally serves an app:// path with no relation to the URL
+  // in the note. Position is what survives.
+  const SOURCE = [
+    '# 标题', '',
+    '![图片](https://a.test/one.jpg)题图：晚霞 | 摄影：金吒', '',
+    '一段正文。', '',
+    '![图片](https://a.test/two.png)说到做到。今天我就想说说。', '',
+  ].join('\n');
+
+  // Mirrors what the host passes in: the projection and its offset map.
+  const plain = (src: string) => {
+    const p = project(src);
+    return { text: p.text, at: (i: number) => p.map[i] ?? 0 };
+  };
+
+  const embeds = findImageEmbeds(SOURCE);
+
+  it('picks the embed a caption follows', () => {
+    const p = plain(SOURCE);
+    const found = embedBySurroundings(SOURCE, embeds, '', '说到做到。今天我就想说说。', p.at, p.text);
+    expect(found?.target).toBe('https://a.test/two.png');
+  });
+
+  it('picks the first when its own caption follows it', () => {
+    const p = plain(SOURCE);
+    const found = embedBySurroundings(SOURCE, embeds, '', '题图：晚霞 | 摄影：金吒', p.at, p.text);
+    expect(found?.target).toBe('https://a.test/one.jpg');
+  });
+
+  it('falls back to the text before when nothing follows', () => {
+    const p = plain(SOURCE);
+    const found = embedBySurroundings(SOURCE, embeds, '一段正文。', '', p.at, p.text);
+    expect(found?.target).toBe('https://a.test/two.png');
+  });
+
+  it('needs no context at all when the note has one image', () => {
+    const one = findImageEmbeds('![x](https://a.test/only.jpg)');
+    const p = plain('![x](https://a.test/only.jpg)');
+    expect(embedBySurroundings('![x](https://a.test/only.jpg)', one, '', '', p.at, p.text)?.target)
+      .toBe('https://a.test/only.jpg');
+  });
+
+  it('gives up rather than guess when the context matches nothing', () => {
+    const p = plain(SOURCE);
+    expect(embedBySurroundings(SOURCE, embeds, '', '完全不存在的文字', p.at, p.text)).toBeNull();
   });
 });

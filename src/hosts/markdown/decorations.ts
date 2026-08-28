@@ -2,7 +2,7 @@ import { EditorView, Decoration, DecorationSet, ViewPlugin, ViewUpdate } from '@
 import { StateEffect, Extension, Range } from '@codemirror/state';
 import { App, MarkdownView, editorInfoField } from 'obsidian';
 import { Annotation, MarkdownAnchor, isComment } from '../../model';
-import { resolve } from '../../anchor/textQuote';
+import { resolveMarkdown } from '../../anchor/resolveAnchor';
 import { paintQuote } from '../paintQuote';
 import { paintImages } from '../paintImage';
 import { Change } from '../../anchor/repair';
@@ -52,7 +52,7 @@ function build(view: EditorView, provider: Provider): DecorationSet {
 
   for (const a of annotations) {
     if (a.anchor.kind !== 'markdown') continue;
-    const at = resolve(doc, a.anchor);
+    const at = resolveMarkdown(doc, a.anchor);
     // A null resolution is an orphan — deliberately draw nothing rather than
     // guess, and let the review panel surface it for re-anchoring.
     if (!at || at.from === at.to) continue;

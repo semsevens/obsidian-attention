@@ -6,7 +6,7 @@
 // exactly what you'd want back. So they're kept, and shown as lost.
 
 import { Annotation } from '../model';
-import { resolve } from '../anchor/textQuote';
+import { resolveMarkdown } from '../anchor/resolveAnchor';
 
 export interface Classified {
   live: Annotation[];
@@ -30,7 +30,7 @@ export function classify(annotations: readonly Annotation[], text: string): Clas
       live.push(a);
       continue;
     }
-    (resolve(text, a.anchor) ? live : lost).push(a);
+    (resolveMarkdown(text, a.anchor) ? live : lost).push(a);
   }
 
   return { live, lost };

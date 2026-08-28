@@ -53,6 +53,52 @@ function cleanTarget(raw: string): string {
   }
 }
 
+/**
+ * Find the embed that produced a rendered image, using the text around it.
+ *
+ * Matching on the `src` is unreliable: plenty of setups rewrite it. A vault
+ * that caches remote pictures locally serves an `app://` path with no relation
+ * to the URL in the note, and a drawing plugin serves a blob. What does hold is
+ * position — an image sits between the same words on screen as it does in the
+ * file.
+ *
+ * `after` is preferred over `before` because a caption immediately following a
+ * picture is the commonest layout, and it pins the embed from the near side.
+ */
+export function embedBySurroundings(
+  source: string,
+  embeds: readonly ImageEmbed[],
+  before: string,
+  after: string,
+  offsetOfPlain: (plainIndex: number) => number,
+  plainText: string,
+): ImageEmbed | null {
+  if (embeds.length === 0) return null;
+  if (embeds.length === 1) return embeds[0];
+
+  const trimmedAfter = after.trim();
+  if (trimmedAfter.length >= 2) {
+    const at = plainText.indexOf(trimmedAfter);
+    if (at >= 0) {
+      const cut = offsetOfPlain(at);
+      const before_ = embeds.filter(e => e.to <= cut);
+      if (before_.length > 0) return before_[before_.length - 1];
+    }
+  }
+
+  const trimmedBefore = before.trim();
+  if (trimmedBefore.length >= 2) {
+    const at = plainText.lastIndexOf(trimmedBefore);
+    if (at >= 0) {
+      const cut = offsetOfPlain(Math.min(at + trimmedBefore.length, plainText.length - 1));
+      const after_ = embeds.filter(e => e.from >= cut);
+      if (after_.length > 0) return after_[0];
+    }
+  }
+
+  return null;
+}
+
 /** The target of a stored embed quote, or null if it isn't one. */
 export function imageTargetOf(quote: string): string | null {
   const found = findImageEmbeds(quote);
@@ -79,6 +125,19 @@ export function imageMatches(src: string, target: string): boolean {
   // A vault embed may be written as a bare filename while src carries the path.
   const name = target.split('/').pop() ?? target;
   return name.length > 0 && decoded.includes(name);
+}
+
+/**
+ * A stable fragment of a rendered image URL, for recognising it again.
+ *
+ * The last path segment: a filename for vault images, a content hash for a
+ * locally cached remote one. Query strings are dropped — Obsidian appends a
+ * changing timestamp to vault resources.
+ */
+export function srcHint(src: string): string {
+  const withoutQuery = safeDecode(src).split(/[?#]/)[0];
+  const tail = withoutQuery.split('/').filter(Boolean).pop() ?? '';
+  return tail.length >= 4 ? tail : '';
 }
 
 function safeDecode(url: string): string {
