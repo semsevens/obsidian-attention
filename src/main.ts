@@ -46,7 +46,7 @@ export default class AttentionPlugin extends Plugin {
     // A change to any annotation has to reach both rendering paths and the
     // review panel; nothing repaints itself.
     this.register(this.store.onChange(() => {
-      repaintEditors(this.app);
+      repaintEditors(this.app, path => this.store.peek(path));
       this.rerenderReadingViews();
       this.refreshReviewViews();
     }));

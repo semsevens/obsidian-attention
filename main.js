@@ -1317,6 +1317,37 @@ var MarkdownHost = class {
 var import_view = require("@codemirror/view");
 var import_state = require("@codemirror/state");
 var import_obsidian8 = require("obsidian");
+
+// src/hosts/paintQuote.ts
+function paintQuote(root, annotation, quote = annotation.anchor.quote) {
+  if (!quote)
+    return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const targets = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const text = n;
+    if (text.data.includes(quote) && !isInsideHighlight(text))
+      targets.push(text);
+  }
+  for (const node of targets) {
+    const at = node.data.indexOf(quote);
+    if (at < 0)
+      continue;
+    const tail = node.splitText(at);
+    tail.splitText(quote.length);
+    const span = document.createElement("span");
+    span.className = isComment(annotation) ? "at-hl at-hl-comment" : "at-hl";
+    span.dataset.atId = annotation.id;
+    tail.replaceWith(span);
+    span.appendChild(tail);
+  }
+}
+function isInsideHighlight(node) {
+  var _a;
+  return ((_a = node.parentElement) == null ? void 0 : _a.closest(".at-hl")) != null;
+}
+
+// src/hosts/markdown/decorations.ts
 var refreshAnnotations = import_state.StateEffect.define();
 function build(view, provider) {
   var _a, _b;
@@ -1361,43 +1392,28 @@ function annotationDecorations(provider) {
     { decorations: (v) => v.decorations }
   );
 }
-function repaintEditors(app) {
+function repaintEditors(app, provider) {
   app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
     const view = leaf.view;
     if (!(view instanceof import_obsidian8.MarkdownView))
       return;
     const cm = view.editor.cm;
     cm == null ? void 0 : cm.dispatch({ effects: refreshAnnotations.of() });
+    if (provider)
+      paintRenderedWidgets(view, provider);
   });
 }
-
-// src/hosts/paintQuote.ts
-function paintQuote(root, annotation, quote = annotation.anchor.quote) {
-  if (!quote)
-    return;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const targets = [];
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    const text = n;
-    if (text.data.includes(quote) && !isInsideHighlight(text))
-      targets.push(text);
-  }
-  for (const node of targets) {
-    const at = node.data.indexOf(quote);
-    if (at < 0)
-      continue;
-    const tail = node.splitText(at);
-    tail.splitText(quote.length);
-    const span = document.createElement("span");
-    span.className = isComment(annotation) ? "at-hl at-hl-comment" : "at-hl";
-    span.dataset.atId = annotation.id;
-    tail.replaceWith(span);
-    span.appendChild(tail);
-  }
-}
-function isInsideHighlight(node) {
+function paintRenderedWidgets(view, provider) {
   var _a;
-  return ((_a = node.parentElement) == null ? void 0 : _a.closest(".at-hl")) != null;
+  const path = (_a = view.file) == null ? void 0 : _a.path;
+  const content = view.contentEl.querySelector(".cm-content");
+  if (!path || !(content instanceof HTMLElement))
+    return;
+  for (const a of provider(path)) {
+    if (a.anchor.kind !== "markdown")
+      continue;
+    paintQuote(content, a);
+  }
 }
 
 // src/hosts/markdown/readingMode.ts
@@ -1772,7 +1788,7 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
       this.transcriptHost.register();
     }
     this.register(this.store.onChange(() => {
-      repaintEditors(this.app);
+      repaintEditors(this.app, (path) => this.store.peek(path));
       this.rerenderReadingViews();
       this.refreshReviewViews();
     }));

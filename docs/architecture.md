@@ -181,6 +181,22 @@ Templater），用户已经熟悉这套 token；以及它跟随 Obsidian 的语�
 而且换任何 markdown 工具都还在。Attention 靠 quote 重锚，改动大了会变孤儿。
 这是「不碰原文」的真实代价 —— 换来的是颜色、评论、时间戳和跨文件回顾。
 
+### Live Preview 的 widget 盲区
+
+表格、callout、嵌入块在实时预览里是 **CM6 widget** —— DOM 由 Obsidian 自己渲染，
+`Decoration.mark` 盖在它背后的源码区间上**画不出任何东西**。这些内容只在 widget
+**被构建时**顺带带上标注，所以现象是「表格里划的线要重开文件才出现」。
+
+补法是刷新时顺带在 `.cm-content` 上跑一遍 `paintQuote`。不需要枚举有哪些 widget：
+`paintQuote` 会跳过已经在 `.at-hl` 里的文字，于是 CM6 覆盖到的地方原样不动，
+**只补它够不着的部分**。
+
+### 一个容易数错的地方
+
+`MarkdownView.contentEl` 里**同时挂着**源码层（`.cm-content`）和阅读层
+（`.markdown-reading-view`），只是同一时刻只显示一层。所以一条标注在 DOM 里会出现
+**两次**，`data-at-id` 相同。排查时按 `.at-hl` 计数会以为重复渲染了 —— 不是。
+
 ### markdown 两种模式的采集差异
 
 | 模式 | 怎么拿到源文件偏移 |
