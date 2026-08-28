@@ -1059,6 +1059,77 @@ ${body}` : body;
 // src/hosts/markdown/MarkdownHost.ts
 var import_obsidian8 = require("obsidian");
 
+// src/anchor/plainText.ts
+var WRAPPERS = ["***", "___", "**", "__", "~~", "==", "*", "_", "`"];
+function project(source) {
+  let text = "";
+  const map = [];
+  let i = 0;
+  const take = (n) => {
+    for (let k = 0; k < n; k++) {
+      text += source[i];
+      map.push(i);
+      i++;
+    }
+  };
+  while (i < source.length) {
+    if (source.startsWith("![", i)) {
+      const close = matchLink(source, i + 1);
+      if (close) {
+        i = close.end;
+        continue;
+      }
+    }
+    if (source[i] === "[") {
+      const link = matchLink(source, i);
+      if (link) {
+        i++;
+        take(link.labelEnd - i);
+        i = link.end;
+        continue;
+      }
+    }
+    const wrapper = WRAPPERS.find((w) => source.startsWith(w, i));
+    if (wrapper) {
+      i += wrapper.length;
+      continue;
+    }
+    take(1);
+  }
+  return { text, map };
+}
+function strip(source) {
+  return project(source).text;
+}
+function toSource(p, from, to) {
+  if (from < 0 || to > p.text.length || to <= from)
+    return null;
+  return { from: p.map[from], to: p.map[to - 1] + 1 };
+}
+function matchLink(source, i) {
+  if (source[i] !== "[")
+    return null;
+  let depth = 0;
+  for (let k = i; k < source.length; k++) {
+    if (source[k] === "[")
+      depth++;
+    else if (source[k] === "]") {
+      depth--;
+      if (depth === 0) {
+        if (source[k + 1] !== "(")
+          return null;
+        const close = source.indexOf(")", k + 2);
+        if (close < 0)
+          return null;
+        return { labelEnd: k, end: close + 1 };
+      }
+    } else if (source[k] === "\n" && depth > 0) {
+      return null;
+    }
+  }
+  return null;
+}
+
 // src/ui/SelectionPopover.ts
 var SelectionPopover = class {
   constructor() {
@@ -1334,18 +1405,33 @@ var MarkdownHost = class {
     if (!selection || selected.trim().length === 0)
       return null;
     const source = await this.app.vault.cachedRead(file);
-    const at = nthOccurrence(source, selected, this.renderedOrdinal(view, selection, selected));
+    const plain = project(source);
+    const at = nthOccurrence(plain.text, selected, this.renderedOrdinal(view, selection, selected));
     if (at < 0) {
-      new import_obsidian8.Notice("Attention: cannot anchor a selection that crosses formatting.");
+      new import_obsidian8.Notice("Attention: could not find that selection in the note.");
       return null;
     }
-    return { kind: "markdown", ...describe(source, at, at + selected.length) };
+    const range = toSource(plain, at, at + selected.length);
+    if (!range)
+      return null;
+    return { kind: "markdown", ...describe(source, range.from, range.to) };
   }
-  /** How many identical strings precede this selection on screen. */
+  /**
+   * How many identical strings precede this selection on screen.
+   *
+   * Counted within the reading container the selection is actually in, not the
+   * whole view: `contentEl` holds the source layer *and* the reading layer at
+   * once — only one visible — so counting across it sees the document twice and
+   * asks for an occurrence that doesn't exist.
+   */
   renderedOrdinal(view, selection, selected) {
+    var _a;
     const sel = selection.getRangeAt(0);
+    const node = sel.startContainer;
+    const el = node instanceof HTMLElement ? node : node.parentElement;
+    const container = (_a = el == null ? void 0 : el.closest(".markdown-preview-view")) != null ? _a : view.contentEl;
     const before = sel.cloneRange();
-    before.selectNodeContents(view.contentEl);
+    before.selectNodeContents(container);
     before.setEnd(sel.startContainer, sel.startOffset);
     return countOccurrences(before.toString(), selected);
   }
@@ -1412,25 +1498,54 @@ var import_obsidian9 = require("obsidian");
 function paintQuote(root, annotation, quote = annotation.anchor.quote) {
   if (!quote)
     return;
+  const nodes = textNodesIn(root);
+  if (nodes.length === 0)
+    return;
+  const starts = [];
+  let full = "";
+  for (const n of nodes) {
+    starts.push(full.length);
+    full += n.data;
+  }
+  const spans = [];
+  for (let at = full.indexOf(quote); at >= 0; at = full.indexOf(quote, at + quote.length)) {
+    const end = at + quote.length;
+    for (let i = 0; i < nodes.length; i++) {
+      const nodeStart = starts[i];
+      const nodeEnd = nodeStart + nodes[i].data.length;
+      if (nodeEnd <= at || nodeStart >= end)
+        continue;
+      spans.push({
+        node: nodes[i],
+        from: Math.max(at, nodeStart) - nodeStart,
+        to: Math.min(end, nodeEnd) - nodeStart
+      });
+    }
+  }
+  for (const s of spans.reverse())
+    wrap(s.node, s.from, s.to, annotation);
+}
+function textNodesIn(root) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const targets = [];
+  const out = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const text = n;
-    if (text.data.includes(quote) && !isInsideHighlight(text))
-      targets.push(text);
+    if (text.data.length > 0 && !isInsideHighlight(text))
+      out.push(text);
   }
-  for (const node of targets) {
-    const at = node.data.indexOf(quote);
-    if (at < 0)
-      continue;
-    const tail = node.splitText(at);
-    tail.splitText(quote.length);
-    const span = document.createElement("span");
-    span.className = isComment(annotation) ? "at-hl at-hl-comment" : "at-hl";
-    span.dataset.atId = annotation.id;
-    tail.replaceWith(span);
-    span.appendChild(tail);
-  }
+  return out;
+}
+function wrap(node, from, to, annotation) {
+  if (to <= from)
+    return;
+  const tail = from > 0 ? node.splitText(from) : node;
+  if (to - from < tail.data.length)
+    tail.splitText(to - from);
+  const span = document.createElement("span");
+  span.className = isComment(annotation) ? "at-hl at-hl-comment" : "at-hl";
+  span.dataset.atId = annotation.id;
+  tail.replaceWith(span);
+  span.appendChild(tail);
 }
 function isInsideHighlight(node) {
   var _a;
@@ -1630,7 +1745,7 @@ function readingModeHighlighter(provider) {
     for (const a of annotations) {
       if (a.anchor.kind !== "markdown")
         continue;
-      paintQuote(el, a);
+      paintQuote(el, a, strip(a.anchor.quote));
     }
   };
 }

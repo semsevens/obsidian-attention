@@ -1,6 +1,7 @@
 import { App, Editor, Menu, MarkdownView, MarkdownFileInfo, Notice, Plugin, TFile } from 'obsidian';
 import { MarkdownAnchor } from '../../model';
 import { describe, nthOccurrence, countOccurrences } from '../../anchor/textQuote';
+import { project, toSource } from '../../anchor/plainText';
 import { AnnotationStore } from '../../store/annotationStore';
 import { SelectionPopover } from '../../ui/SelectionPopover';
 import { CommentBubble } from '../../ui/CommentBubble';
@@ -186,21 +187,37 @@ export class MarkdownHost {
     if (!selection || selected.trim().length === 0) return null;
 
     const source = await this.app.vault.cachedRead(file);
-    const at = nthOccurrence(source, selected, this.renderedOrdinal(view, selection, selected));
+    // Search a projection of the source with inline markup stripped — that is
+    // what the reader actually selected. Searching the raw source instead would
+    // refuse any selection containing emphasis, a link or a highlight, which in
+    // a real note is most of them.
+    const plain = project(source);
+    const at = nthOccurrence(plain.text, selected, this.renderedOrdinal(view, selection, selected));
     if (at < 0) {
-      // The selection spans rendered markup (e.g. from plain text into bold),
-      // so the exact string never appears in the source.
-      new Notice('Attention: cannot anchor a selection that crosses formatting.');
+      new Notice('Attention: could not find that selection in the note.');
       return null;
     }
-    return { kind: 'markdown', ...describe(source, at, at + selected.length) };
+    const range = toSource(plain, at, at + selected.length);
+    if (!range) return null;
+    return { kind: 'markdown', ...describe(source, range.from, range.to) };
   }
 
-  /** How many identical strings precede this selection on screen. */
+  /**
+   * How many identical strings precede this selection on screen.
+   *
+   * Counted within the reading container the selection is actually in, not the
+   * whole view: `contentEl` holds the source layer *and* the reading layer at
+   * once — only one visible — so counting across it sees the document twice and
+   * asks for an occurrence that doesn't exist.
+   */
   private renderedOrdinal(view: MarkdownView, selection: Selection, selected: string): number {
     const sel = selection.getRangeAt(0);
+    const node = sel.startContainer;
+    const el = node instanceof HTMLElement ? node : node.parentElement;
+    const container = el?.closest('.markdown-preview-view') ?? view.contentEl;
+
     const before = sel.cloneRange();
-    before.selectNodeContents(view.contentEl);
+    before.selectNodeContents(container);
     before.setEnd(sel.startContainer, sel.startOffset);
     return countOccurrences(before.toString(), selected);
   }
