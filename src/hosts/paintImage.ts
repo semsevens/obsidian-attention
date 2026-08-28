@@ -12,6 +12,7 @@ import { imageTargetOf, imageMatches, srcHint } from '../anchor/imageAnchor';
  * Idempotent, like the text painter: an image already marked is left alone.
  */
 export function paintImages(root: HTMLElement, annotations: readonly Annotation[]): void {
+  if (root.closest('.at-review')) return;
   const targets: { target: string; hint: string; annotation: Annotation }[] = [];
   for (const a of annotations) {
     if (a.anchor.kind !== 'markdown') continue;

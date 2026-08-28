@@ -1,4 +1,4 @@
-import { ItemView, Menu, Notice, WorkspaceLeaf, TFile } from 'obsidian';
+import { ItemView, Menu, Notice, WorkspaceLeaf, TFile, MarkdownRenderer } from 'obsidian';
 import type AttentionPlugin from '../main';
 import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
 import { Annotation, isComment, lastMarked } from '../model';
@@ -7,6 +7,7 @@ import { inDocumentOrder } from '../store/documentOrder';
 import { classify } from '../store/orphans';
 import { describe as describeAnchor } from '../anchor/textQuote';
 import { MarkdownView } from 'obsidian';
+import { isImageQuote } from '../anchor/imageAnchor';
 import { reveal } from '../hosts/markdown/reveal';
 import { formatWhen } from '../ui/time';
 import { CommentModal } from '../ui/CommentModal';
@@ -217,7 +218,16 @@ export class ReviewView extends ItemView {
     const el = root.createDiv('at-entry');
     if (lost) el.addClass('at-entry-lost');
 
-    el.createDiv('at-quote').setText(annotation.anchor.quote);
+    if (isImageQuote(annotation.anchor.quote)) {
+      // Render the embed through Obsidian rather than resolving a URL here.
+      // Whatever the note shows, this shows: a plugin that swaps remote
+      // pictures for locally cached ones runs in that pipeline too, so the
+      // thumbnail resolves exactly as the picture in the note does.
+      const thumb = el.createDiv('at-thumb');
+      void MarkdownRenderer.render(this.app, annotation.anchor.quote, thumb, targetPath, this);
+    } else {
+      el.createDiv('at-quote').setText(annotation.anchor.quote);
+    }
     if (isComment(annotation)) {
       el.createDiv('at-body').setText(annotation.body ?? '');
     }

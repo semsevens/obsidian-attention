@@ -23,6 +23,9 @@ export function paintQuote(
   quote = annotation.anchor.quote,
 ): void {
   if (!quote) return;
+  // The review panel renders quotes of its own; marking those would be marking
+  // our own output.
+  if (root.closest('.at-review')) return;
 
   const nodes = textNodesIn(root);
   if (nodes.length === 0) return;

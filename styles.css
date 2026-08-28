@@ -378,3 +378,40 @@ body.at-style-background .at-hl:hover {
 .at-img:hover {
   outline-color: var(--interactive-accent);
 }
+
+/* ── Panel entries: thumbnails and long text ───────────────────────────────── */
+
+/* An image mark shows the picture, not the embed that produced it. */
+.at-thumb img {
+  max-width: 100%;
+  max-height: 120px;
+  width: auto;
+  height: auto;
+  border-radius: 3px;
+  display: block;
+}
+
+.at-thumb p {
+  margin: 0;
+}
+
+/* A quote can be a URL with no spaces in it, which would otherwise push the
+   panel wider than the sidebar and scroll the whole thing sideways. */
+.at-quote,
+.at-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Long quotes are trimmed rather than allowed to fill the panel; the whole
+   thing is one click away in the note. */
+.at-quote {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.at-review {
+  overflow-x: hidden;
+}

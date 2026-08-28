@@ -962,7 +962,12 @@ var ReviewView = class extends import_obsidian6.ItemView {
     const el = root.createDiv("at-entry");
     if (lost)
       el.addClass("at-entry-lost");
-    el.createDiv("at-quote").setText(annotation.anchor.quote);
+    if (isImageQuote(annotation.anchor.quote)) {
+      const thumb = el.createDiv("at-thumb");
+      void import_obsidian6.MarkdownRenderer.render(this.app, annotation.anchor.quote, thumb, targetPath, this);
+    } else {
+      el.createDiv("at-quote").setText(annotation.anchor.quote);
+    }
     if (isComment(annotation)) {
       el.createDiv("at-body").setText((_a = annotation.body) != null ? _a : "");
     }
@@ -1767,6 +1772,8 @@ var import_obsidian9 = require("obsidian");
 function paintQuote(root, annotation, quote = annotation.anchor.quote) {
   if (!quote)
     return;
+  if (root.closest(".at-review"))
+    return;
   const nodes = textNodesIn(root);
   if (nodes.length === 0)
     return;
@@ -1824,6 +1831,8 @@ function isInsideHighlight(node) {
 // src/hosts/paintImage.ts
 function paintImages(root, annotations) {
   var _a, _b;
+  if (root.closest(".at-review"))
+    return;
   const targets = [];
   for (const a of annotations) {
     if (a.anchor.kind !== "markdown")
