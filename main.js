@@ -972,16 +972,22 @@ var ReviewView = class extends import_obsidian6.ItemView {
       el.createDiv("at-body").setText((_a = annotation.body) != null ? _a : "");
     }
     const meta = el.createDiv("at-meta");
+    const left = meta.createDiv("at-meta-left");
     if (this.lens === "all" || this.resurfaced) {
-      meta.createSpan({ text: (_b = targetPath.split("/").pop()) != null ? _b : targetPath, cls: "at-source" });
+      const name = (_b = targetPath.split("/").pop()) != null ? _b : targetPath;
+      left.createSpan({ text: name.replace(/\.md$/, ""), cls: "at-source" });
     }
     if (annotation.anchor.kind === "transcript") {
-      meta.createSpan({ text: fmtTime(annotation.anchor.start), cls: "at-time" });
+      left.createSpan({ text: fmtTime(annotation.anchor.start), cls: "at-time" });
     }
-    meta.createSpan({ text: formatWhen(lastMarked(annotation), this.plugin.settings.timeFormat), cls: "at-when" });
+    const right = meta.createDiv("at-meta-right");
     if (annotation.hits.length > 1) {
-      meta.createSpan({ text: `${annotation.hits.length}\xD7`, cls: "at-hits" });
+      right.createSpan({ text: `${annotation.hits.length}\xD7`, cls: "at-hits" });
     }
+    right.createSpan({
+      text: formatWhen(lastMarked(annotation), this.plugin.settings.timeFormat),
+      cls: "at-when"
+    });
     const actions = el.createDiv("at-entry-actions");
     const act = (label, title, fn, warn = false) => {
       const b = actions.createEl("button", { cls: "at-icon-btn", text: label });

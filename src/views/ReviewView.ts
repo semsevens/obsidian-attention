@@ -232,19 +232,30 @@ export class ReviewView extends ItemView {
       el.createDiv('at-body').setText(annotation.body ?? '');
     }
 
+    // Where on the left, when on the right. Filenames vary in length and times
+    // don't, so letting the name take the slack keeps the timestamps in a
+    // column you can read straight down.
     const meta = el.createDiv('at-meta');
+
+    const left = meta.createDiv('at-meta-left');
     // In the per-note outline the filename is noise — it's the same every time.
     if (this.lens === 'all' || this.resurfaced) {
-      meta.createSpan({ text: targetPath.split('/').pop() ?? targetPath, cls: 'at-source' });
+      const name = targetPath.split('/').pop() ?? targetPath;
+      left.createSpan({ text: name.replace(/\.md$/, ''), cls: 'at-source' });
     }
     if (annotation.anchor.kind === 'transcript') {
-      meta.createSpan({ text: fmtTime(annotation.anchor.start), cls: 'at-time' });
+      left.createSpan({ text: fmtTime(annotation.anchor.start), cls: 'at-time' });
     }
-    meta.createSpan({ text: formatWhen(lastMarked(annotation), this.plugin.settings.timeFormat), cls: 'at-when' });
+
+    const right = meta.createDiv('at-meta-right');
     // A passage that caught you more than once is the point; say so.
     if (annotation.hits.length > 1) {
-      meta.createSpan({ text: `${annotation.hits.length}×`, cls: 'at-hits' });
+      right.createSpan({ text: `${annotation.hits.length}×`, cls: 'at-hits' });
     }
+    right.createSpan({
+      text: formatWhen(lastMarked(annotation), this.plugin.settings.timeFormat),
+      cls: 'at-when',
+    });
 
     // Acting on a mark from the list, rather than having to find it in the note
     // first. Revealed on hover so a long list stays quiet.

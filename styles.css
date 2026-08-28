@@ -98,13 +98,38 @@
 
 .at-meta {
   display: flex;
-  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
   margin-top: 4px;
   font-size: var(--font-ui-smaller);
   color: var(--text-faint);
 }
 
-.at-time {
+/* The name gives up space first — it's the variable-length half. */
+.at-meta-left {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.at-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Times keep their full width so they line up down the list. */
+.at-meta-right {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.at-time,
+.at-when {
   font-variant-numeric: tabular-nums;
 }
 
