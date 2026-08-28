@@ -3,3 +3,6 @@ node_modules/
 *.log
 data.json
 coverage/
+
+# Where this machine deploys dev builds (see esbuild.config.mjs)
+.dev-vault

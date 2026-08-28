@@ -134,7 +134,7 @@ npm test         # vitest, watch with: npm run test:watch
 ```
 
 `npm run dev` copies `main.js`, `manifest.json` and `styles.css` into
-`~/Desktop/ob/me/.obsidian/plugins/attention/` after every rebuild (`styles.css` is
+the vault named in `.dev-vault` after every rebuild (`styles.css` is
 watched separately, so CSS-only edits deploy too). Point it elsewhere with
 `VAULT_PLUGIN_DIR=/path/to/vault/.obsidian/plugins/attention`, or set it empty to
 skip deploying.

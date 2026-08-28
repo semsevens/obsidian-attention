@@ -573,7 +573,9 @@ npm test       # vitest
 
 **部署用复制，不用软链** —— 本 repo 在 iCloud Drive 上，把 vault 指向 iCloud 路径
 有 Obsidian 卡在被 evict 的文件上的风险。复制只要几毫秒，且 vault 保持自包含。
-目标目录由 `VAULT_PLUGIN_DIR` 覆盖，置空则跳过（CI 就是这么做的）。
+
+**部署到哪是这台机器的属性，不是插件的属性**：从 `VAULT_PLUGIN_DIR` 或一个
+gitignore 掉的 `.dev-vault` 文件（内容是 vault 根目录）读，两者都没有就不部署。
 构建时会写一个 `.hotreload` 标记文件，装了 pjeby/hot-reload 就能存盘即重载。
 
 `styles.css` 不是 esbuild 的输入，所以单独 watch —— 改 CSS 不必去碰某个 .ts 文件

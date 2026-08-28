@@ -2,8 +2,8 @@ import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from "node:module";
 import { copyFile, mkdir, writeFile, access } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { homedir } from "node:os";
 
 const builtins = [...builtinModules, ...builtinModules.map(m => `node:${m}`)];
 
@@ -26,9 +26,20 @@ const PLUGIN_ID = JSON.parse(
   await import("node:fs").then(fs => fs.promises.readFile("manifest.json", "utf8")),
 ).id;
 
-const vaultDir =
-  process.env.VAULT_PLUGIN_DIR ??
-  join(homedir(), "Desktop/ob/me/.obsidian/plugins", PLUGIN_ID);
+// Where to deploy is a property of this machine, not of the plugin, so it is
+// read from the environment or from a gitignored file rather than baked in.
+// Without either, the build simply doesn't deploy.
+function devVault() {
+  if (process.env.VAULT_PLUGIN_DIR !== undefined) return process.env.VAULT_PLUGIN_DIR;
+  try {
+    const vault = readFileSync(".dev-vault", "utf8").trim();
+    if (vault) return join(vault, ".obsidian/plugins", PLUGIN_ID);
+  } catch {
+    // No local config: nothing to deploy to.
+  }
+  return "";
+}
+const vaultDir = devVault();
 
 const ASSETS = ["main.js", "manifest.json", "styles.css"];
 
@@ -37,7 +48,7 @@ async function exists(p) {
 }
 
 async function deploy() {
-  if (!vaultDir) return; // explicitly disabled
+  if (!vaultDir) return;   // no dev vault configured on this machine // explicitly disabled
   // Only deploy into a real vault — keeps CI (and any other machine) quiet
   // instead of creating a stray directory tree.
   if (!(await exists(dirname(dirname(vaultDir))))) {
