@@ -6,7 +6,6 @@ import { resolveMarkdown } from '../../anchor/resolveAnchor';
 import { paintQuote } from '../paintQuote';
 import { paintImages } from '../paintImage';
 import { Change } from '../../anchor/repair';
-import { strip } from '../../anchor/plainText';
 import { asEl } from '../../dom';
 
 /**

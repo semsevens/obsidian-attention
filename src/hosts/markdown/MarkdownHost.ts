@@ -513,9 +513,3 @@ export class MarkdownHost {
   }
 }
 
-/** A zero-size rect at the pointer, so the popover can position itself. */
-function rectOf(e: MouseEvent | KeyboardEvent): DOMRect {
-  const x = e instanceof MouseEvent ? e.clientX : window.innerWidth / 2;
-  const y = e instanceof MouseEvent ? e.clientY : window.innerHeight / 2;
-  return new DOMRect(x, y, 0, 0);
-}

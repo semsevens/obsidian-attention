@@ -11,9 +11,9 @@ import { asEl } from '../dom';
  * into a count.
  */
 export interface BubbleActions {
-  onEdit(): void;
-  onMarkAgain(): void;
-  onRemove(): void;
+  onEdit: () => void;
+  onMarkAgain: () => void;
+  onRemove: () => void;
 }
 
 export class CommentBubble {
@@ -29,7 +29,7 @@ export class CommentBubble {
   showFor(rect: DOMRect, annotation: Annotation, actions: BubbleActions): void {
     this.hide();
 
-    const el = createEl('div', { cls: 'at-bubble' });
+    const el = createDiv({ cls: 'at-bubble' });
 
     const body = annotation.body;
     if (body && body.trim().length > 0) el.createDiv('at-bubble-body').setText(body);

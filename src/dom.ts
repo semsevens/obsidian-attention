@@ -29,5 +29,5 @@ export function elementOf(node: Node | null | undefined): HTMLElement | null {
 function narrow<T>(value: unknown, type: { new (): T }): T | null {
   const node = value as Node | null | undefined;
   if (!node || typeof node.instanceOf !== 'function') return null;
-  return node.instanceOf(type) ? (node as unknown as T) : null;
+  return node.instanceOf(type) ? node : null;
 }

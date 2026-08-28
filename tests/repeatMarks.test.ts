@@ -13,7 +13,9 @@ function makeApp(files: Map<string, string>): App {
       modify: async (f: TFile, d: string) => { files.set(f.path, d); },
       create: async (p: string, d: string) => { files.set(p, d); return new TFile(p); },
       getFiles: () => [...files.keys()].map(p => new TFile(p)),
-      trash: async (f: TFile) => { files.delete(f.path); },
+    },
+    fileManager: {
+      trashFile: async (file: TFile) => { files.delete(file.path); },
     },
   };
 }

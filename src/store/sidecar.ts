@@ -40,7 +40,7 @@ export async function saveSidecar(app: App, data: AnnotationFile): Promise<void>
   const existing = app.vault.getAbstractFileByPath(path);
 
   if (data.annotations.length === 0) {
-    if (existing instanceof TFile) await app.vault.trash(existing, true);
+    if (existing instanceof TFile) await app.fileManager.trashFile(existing);
     return;
   }
 

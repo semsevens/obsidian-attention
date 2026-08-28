@@ -93,7 +93,7 @@ export class AttentionSettingTab extends PluginSettingTab {
       .setName('Time format')
       .addText(t =>
         t
-          .setPlaceholder('empty = relative')
+          .setPlaceholder('Empty = relative')
           .setValue(this.plugin.settings.timeFormat)
           .onChange(async v => {
             this.plugin.settings.timeFormat = v.trim();

@@ -16,6 +16,8 @@ export interface App {
     modify(file: TFile, data: string): Promise<void>;
     create(path: string, data: string): Promise<TFile>;
     getFiles(): TFile[];
-    trash(file: TFile, system: boolean): Promise<void>;
+  };
+  fileManager: {
+    trashFile(file: TFile): Promise<void>;
   };
 }

@@ -80,7 +80,7 @@ var AttentionSettingTab = class extends import_obsidian2.PluginSettingTab {
     );
     const sample = new Date().toISOString();
     const timeSetting = new import_obsidian2.Setting(containerEl).setName("Time format").addText(
-      (t) => t.setPlaceholder("empty = relative").setValue(this.plugin.settings.timeFormat).onChange(async (v) => {
+      (t) => t.setPlaceholder("Empty = relative").setValue(this.plugin.settings.timeFormat).onChange(async (v) => {
         this.plugin.settings.timeFormat = v.trim();
         await this.plugin.saveSettings();
         describeTime();
@@ -243,7 +243,7 @@ async function saveSidecar(app, data) {
   const existing = app.vault.getAbstractFileByPath(path);
   if (data.annotations.length === 0) {
     if (existing instanceof import_obsidian3.TFile)
-      await app.vault.trash(existing, true);
+      await app.fileManager.trashFile(existing);
     return;
   }
   const body = JSON.stringify(data, null, 2);
@@ -1332,7 +1332,7 @@ var SelectionPopover = class {
   }
   showAt(rect, actions) {
     this.hide();
-    const el = createEl("div", { cls: "at-popover" });
+    const el = createDiv({ cls: "at-popover" });
     const add = (label, title, fn, cls = "at-pop-btn") => {
       const b = el.createEl("button", { cls, text: label });
       b.setAttribute("aria-label", title);
@@ -1392,7 +1392,7 @@ var CommentBubble = class {
   }
   showFor(rect, annotation, actions) {
     this.hide();
-    const el = createEl("div", { cls: "at-bubble" });
+    const el = createDiv({ cls: "at-bubble" });
     const body = annotation.body;
     if (body && body.trim().length > 0)
       el.createDiv("at-bubble-body").setText(body);
@@ -1953,7 +1953,7 @@ function wrap(node, from, to, annotation) {
   const tail = from > 0 ? node.splitText(from) : node;
   if (to - from < tail.data.length)
     tail.splitText(to - from);
-  const span = createEl("span", { cls: isComment(annotation) ? "at-hl at-hl-comment" : "at-hl" });
+  const span = createSpan({ cls: isComment(annotation) ? "at-hl at-hl-comment" : "at-hl" });
   span.dataset.atId = annotation.id;
   tail.replaceWith(span);
   span.appendChild(tail);
@@ -2607,7 +2607,7 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
     });
     this.addCommand({
       id: "open-review",
-      name: "Open attention review",
+      name: "Open review",
       callback: () => {
         void this.openReview();
       }
@@ -2809,7 +2809,7 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
       return;
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
     if (sidecar instanceof import_obsidian12.TFile)
-      await this.app.vault.trash(sidecar, true);
+      await this.app.fileManager.trashFile(sidecar);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);
     this.refreshReviewViews();

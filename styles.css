@@ -159,6 +159,7 @@
 .at-hl-comment {
   background: color-mix(in srgb, var(--at-color, #f5c542) 18%, transparent);
   border-radius: 2px;
+  -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
 
@@ -168,6 +169,7 @@
 body.at-style-background .at-hl {
   background: color-mix(in srgb, var(--at-color, #f5c542) 42%, transparent);
   border-radius: 2px;
+  -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
   box-shadow: none;
 }
@@ -303,7 +305,6 @@ body.at-style-background .at-hl:hover {
 
 .at-entry-lost .at-quote {
   text-decoration: line-through;
-  text-decoration-color: var(--text-faint);
   color: var(--text-muted);
 }
 

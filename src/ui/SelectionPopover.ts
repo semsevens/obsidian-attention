@@ -6,12 +6,12 @@
  * caught you — isn't something a swatch can say.
  */
 export interface PopoverActions {
-  onMark?(): void;
-  onComment(): void;
-  onMarkAgain?(): void;
-  onRemove?(): void;
+  onMark?: () => void;
+  onComment: () => void;
+  onMarkAgain?: () => void;
+  onRemove?: () => void;
   /** Offered for pictures, where clicking would otherwise have zoomed. */
-  onZoom?(): void;
+  onZoom?: () => void;
 }
 
 export class SelectionPopover {
@@ -21,7 +21,7 @@ export class SelectionPopover {
   showAt(rect: DOMRect, actions: PopoverActions): void {
     this.hide();
 
-    const el = createEl('div', { cls: 'at-popover' });
+    const el = createDiv({ cls: 'at-popover' });
 
     const add = (label: string, title: string, fn: () => void, cls = 'at-pop-btn') => {
       const b = el.createEl('button', { cls, text: label });

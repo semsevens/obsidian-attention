@@ -73,7 +73,7 @@ export default class AttentionPlugin extends Plugin {
 
     this.addCommand({
       id: 'open-review',
-      name: 'Open attention review',
+      name: 'Open review',
       callback: () => { void this.openReview(); },
     });
 
@@ -306,7 +306,7 @@ export default class AttentionPlugin extends Plugin {
     if (this.settings.keepOrphanedSidecars) return;
 
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
-    if (sidecar instanceof TFile) await this.app.vault.trash(sidecar, true);
+    if (sidecar instanceof TFile) await this.app.fileManager.trashFile(sidecar);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);
     this.refreshReviewViews();
