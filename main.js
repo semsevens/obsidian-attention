@@ -243,7 +243,7 @@ async function saveSidecar(app, data) {
   const existing = app.vault.getAbstractFileByPath(path);
   if (data.annotations.length === 0) {
     if (existing instanceof import_obsidian3.TFile)
-      await app.fileManager.trashFile(existing);
+      await app.vault.trash(existing, true);
     return;
   }
   const body = JSON.stringify(data, null, 2);
@@ -1336,8 +1336,10 @@ var SelectionPopover = class {
       window.innerWidth - width - 8
     );
     const above = rect.top - height - 8;
-    el.style.left = `${left}px`;
-    el.style.top = `${above < 8 ? rect.bottom + 8 : above}px`;
+    el.setCssStyles({
+      left: `${left}px`,
+      top: `${above < 8 ? rect.bottom + 8 : above}px`
+    });
     window.setTimeout(() => {
       document.addEventListener("mousedown", this.dismiss);
       document.addEventListener("keydown", this.dismiss);
@@ -1400,8 +1402,10 @@ var CommentBubble = class {
       window.innerWidth - width - 8
     );
     const above = rect.top - height - 8;
-    el.style.left = `${left}px`;
-    el.style.top = `${above < 8 ? rect.bottom + 8 : above}px`;
+    el.setCssStyles({
+      left: `${left}px`,
+      top: `${above < 8 ? rect.bottom + 8 : above}px`
+    });
     window.setTimeout(() => {
       document.addEventListener("mousedown", this.dismiss);
       document.addEventListener("keydown", this.dismiss);
@@ -2597,7 +2601,7 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
   }
   /** One colour for every mark, published as a variable so nothing repaints. */
   applyMarkColor() {
-    document.body.style.setProperty("--at-color", this.settings.markColor);
+    document.body.setCssProps({ "--at-color": this.settings.markColor });
   }
   /**
    * Opening a sidecar opens what it annotates instead.
@@ -2780,7 +2784,7 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
       return;
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
     if (sidecar instanceof import_obsidian12.TFile)
-      await this.app.fileManager.trashFile(sidecar);
+      await this.app.vault.trash(sidecar, true);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);
     this.refreshReviewViews();
@@ -2791,7 +2795,7 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
     (_b = this.tracker) == null ? void 0 : _b.dispose();
     (_c = this.transcriptHost) == null ? void 0 : _c.detach();
     document.body.removeClass("at-style-background");
-    document.body.style.removeProperty("--at-color");
+    document.body.setCssProps({ "--at-color": "" });
   }
   async loadSettings() {
     const saved = await this.loadData();

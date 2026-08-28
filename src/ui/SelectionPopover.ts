@@ -52,8 +52,10 @@ export class SelectionPopover {
       window.innerWidth - width - 8,
     );
     const above = rect.top - height - 8;
-    el.style.left = `${left}px`;
-    el.style.top = `${above < 8 ? rect.bottom + 8 : above}px`;
+    el.setCssStyles({
+      left: `${left}px`,
+      top: `${above < 8 ? rect.bottom + 8 : above}px`,
+    });
 
     // Defer so the mouseup that opened us doesn't immediately close us.
     window.setTimeout(() => {

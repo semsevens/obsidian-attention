@@ -564,6 +564,18 @@ this.contentEl.dispatchEvent(new CustomEvent('mt:transcript-rendered', {
 单向依赖：media-transcript 不知道本插件存在，只是往外喊一声；本插件监听后幂等重贴。
 没装 media-transcript 时该 adapter 自动跳过。
 
+## 官方社区审核的两条硬规则
+
+自动审核会拦下两类写法（`obsidian-plugin-publishing/README.md` 有完整清单）：
+
+- **`no-static-styles-assignment`**：不能 `el.style.x = …`，要用 `setCssStyles()` /
+  `setCssProps()`。浮层定位和那个 `--at-color` 变量都改过来了。
+- **`no-unsupported-api`**：用了比 `minAppVersion` 更新的 API 就是 Error。
+  `loadIfDeferred` / `isDeferred` 是 **1.7.2** 引入的，而修复「面板一片空白」
+  必须用它们，所以 `minAppVersion` 定在 1.7.2。
+  `fileManager.trashFile`（1.6.6）换成了 `vault.trash(file, true)`（0.9.7）——
+  行为一样，不必为它抬高门槛。
+
 ## 开发与测试
 
 ```bash

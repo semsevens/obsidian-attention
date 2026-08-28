@@ -95,7 +95,7 @@ export default class AttentionPlugin extends Plugin {
 
   /** One colour for every mark, published as a variable so nothing repaints. */
   applyMarkColor(): void {
-    document.body.style.setProperty('--at-color', this.settings.markColor);
+    document.body.setCssProps({ '--at-color': this.settings.markColor });
   }
 
   /**
@@ -306,7 +306,7 @@ export default class AttentionPlugin extends Plugin {
     if (this.settings.keepOrphanedSidecars) return;
 
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
-    if (sidecar instanceof TFile) await this.app.fileManager.trashFile(sidecar);
+    if (sidecar instanceof TFile) await this.app.vault.trash(sidecar, true);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);
     this.refreshReviewViews();
@@ -317,7 +317,7 @@ export default class AttentionPlugin extends Plugin {
     this.tracker?.dispose();
     this.transcriptHost?.detach();
     document.body.removeClass('at-style-background');
-    document.body.style.removeProperty('--at-color');
+    document.body.setCssProps({ '--at-color': '' });
   }
 
   async loadSettings() {

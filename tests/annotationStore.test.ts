@@ -26,9 +26,7 @@ function makeApp(files: Map<string, string>): App {
         return new TFile(path);
       },
       getFiles: () => [...files.keys()].map(p => new TFile(p)),
-    },
-    fileManager: {
-      trashFile: async (file: TFile) => { files.delete(file.path); },
+      trash: async (file: TFile) => { files.delete(file.path); },
     },
   };
 }

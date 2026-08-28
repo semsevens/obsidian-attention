@@ -1,9 +1,9 @@
 {
 	"id": "attention",
 	"name": "Attention",
-	"version": "0.1.0",
-	"minAppVersion": "1.4.0",
-	"description": "Record where your attention went — highlights and comments on notes, transcripts and subtitles — then revisit them. Never modifies the original file.",
+	"version": "0.1.1",
+	"minAppVersion": "1.7.2",
+	"description": "Record where your attention went \u2014 highlights and comments on notes, transcripts and subtitles \u2014 then revisit them. Never modifies the original file.",
 	"author": "semsevens",
 	"authorUrl": "https://github.com/semsevens",
 	"isDesktopOnly": false
