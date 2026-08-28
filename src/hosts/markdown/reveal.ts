@@ -1,6 +1,7 @@
 import { App, MarkdownView, TFile } from 'obsidian';
 import { Annotation } from '../../model';
 import { resolveMarkdown } from '../../anchor/resolveAnchor';
+import { asEl, asMedia } from '../../dom';
 
 /**
  * Go to an annotation: open its file and put the passage in front of you.
@@ -31,15 +32,15 @@ async function revealInTranscript(app: App, file: TFile, annotation: Annotation)
   await app.workspace.getLeaf(false).openFile(file);
 
   for (let i = 0; i < 40; i++) {
-    const media = document.querySelector('.mt-view video, .mt-view audio');
-    if (media instanceof HTMLMediaElement) {
+    const media = asMedia(document.querySelector('.mt-view video, .mt-view audio'));
+    if (media) {
       const seek = () => { media.currentTime = at; };
       if (media.readyState > 0) seek();
       else media.addEventListener('loadedmetadata', seek, { once: true });
       void media.play();
 
-      const painted = document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`);
-      if (painted instanceof HTMLElement) {
+      const painted = asEl(document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`));
+      if (painted) {
         painted.scrollIntoView({ behavior: 'smooth', block: 'center' });
         flash(painted);
       }
@@ -85,8 +86,8 @@ async function revealInMarkdown(
  */
 async function flashWhenPainted(view: MarkdownView, id: string, tries = 20): Promise<void> {
   for (let i = 0; i < tries; i++) {
-    const el = view.contentEl.querySelector(`.at-hl[data-at-id="${id}"]`);
-    if (el instanceof HTMLElement) {
+    const el = asEl(view.contentEl.querySelector(`.at-hl[data-at-id="${id}"]`));
+    if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       flash(el);
       return;

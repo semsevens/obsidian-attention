@@ -18,7 +18,7 @@ const SETTLE_MS = 800;
  * should not.
  */
 export class AnchorTracker {
-  private pending = new Map<string, ReturnType<typeof setTimeout>>();
+  private pending = new Map<string, ReturnType<typeof window.setTimeout>>();
 
   constructor(private store: AnnotationStore) {}
 
@@ -57,8 +57,8 @@ export class AnchorTracker {
 
   private schedule(path: string, updates: Map<string, MarkdownAnchor>): void {
     const existing = this.pending.get(path);
-    if (existing) clearTimeout(existing);
-    this.pending.set(path, setTimeout(() => {
+    if (existing) window.clearTimeout(existing);
+    this.pending.set(path, window.setTimeout(() => {
       this.pending.delete(path);
       void this.flush(path, updates);
     }, SETTLE_MS));
@@ -71,7 +71,7 @@ export class AnchorTracker {
   }
 
   dispose(): void {
-    for (const t of this.pending.values()) clearTimeout(t);
+    for (const t of this.pending.values()) window.clearTimeout(t);
     this.pending.clear();
   }
 }

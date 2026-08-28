@@ -1,5 +1,6 @@
 import { Annotation, isComment } from '../model';
 import { imageTargetOf, imageMatches, srcHint } from '../anchor/imageAnchor';
+import { asEl, asImg } from '../dom';
 
 /**
  * Outline the pictures that have been marked.
@@ -21,8 +22,9 @@ export function paintImages(root: HTMLElement, annotations: readonly Annotation[
   }
   if (targets.length === 0) return;
 
-  for (const img of Array.from(root.querySelectorAll('img'))) {
-    if (!(img instanceof HTMLImageElement)) continue;
+  for (const raw of Array.from(root.querySelectorAll('img'))) {
+    const img = asImg(raw);
+    if (!img) continue;
     const src = img.getAttribute('src') ?? '';
     const hint = srcHint(src);
     // Either the embed points at this picture, or this is the picture we saw
@@ -43,5 +45,5 @@ export function paintImages(root: HTMLElement, annotations: readonly Annotation[
 
 /** Which annotation, if any, a rendered image carries. */
 export function markedImageId(el: Element | null): string | null {
-  return el instanceof HTMLElement ? el.dataset.atId ?? null : null;
+  return asEl(el)?.dataset.atId ?? null;
 }

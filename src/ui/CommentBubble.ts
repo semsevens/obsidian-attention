@@ -1,5 +1,6 @@
 import { Annotation } from '../model';
 import { formatWhen } from './time';
+import { asEl } from '../dom';
 
 /**
  * What you get when you click a mark: its comment, when it caught you, and the
@@ -21,15 +22,14 @@ export class CommentBubble {
   constructor(private timeFormat = '') {}
 
   private dismiss = (e: Event) => {
-    if (e.target instanceof Node && this.el?.contains(e.target)) return;
+    if (this.el?.contains(asEl(e.target))) return;
     this.hide();
   };
 
   showFor(rect: DOMRect, annotation: Annotation, actions: BubbleActions): void {
     this.hide();
 
-    const el = document.createElement('div');
-    el.className = 'at-bubble';
+    const el = createEl('div', { cls: 'at-bubble' });
 
     const body = annotation.body;
     if (body && body.trim().length > 0) el.createDiv('at-bubble-body').setText(body);

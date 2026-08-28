@@ -10,6 +10,7 @@ import { SelectionPopover } from '../../ui/SelectionPopover';
 import { CommentBubble } from '../../ui/CommentBubble';
 import { CommentModal } from '../../ui/CommentModal';
 import { AttentionSettings } from '../../settings';
+import { asEl, asImg, elementOf } from '../../dom';
 
 /**
  * Turns a selection in a markdown note into an annotation, via the right-click
@@ -48,7 +49,7 @@ export class MarkdownHost {
     this.plugin.registerDomEvent(
       document,
       'contextmenu',
-      e => { this.lastTarget = e.target instanceof HTMLElement ? e.target : null; },
+      e => { this.lastTarget = asEl(e.target); },
       true,
     );
 
@@ -64,7 +65,7 @@ export class MarkdownHost {
     // to raise a menu) doesn't also throw the swatches up.
     this.plugin.registerDomEvent(document, 'mouseup', e => {
       if (e.button !== 0 || !this.settings.popoverOnSelection) return;
-      if (e.target instanceof HTMLElement && e.target.closest('.at-hl, .at-popover, .at-bubble')) return;
+      if (asEl(e.target)?.closest('.at-hl, .at-popover, .at-bubble')) return;
       // Defer so the selection is final by the time we read it.
       window.setTimeout(() => { void this.onSelectionMade(); }, 0);
     });
@@ -74,8 +75,8 @@ export class MarkdownHost {
     // the image and it has to be headed off before it runs.
     this.plugin.registerDomEvent(document, 'click', e => {
       if (this.passingThrough) return;
-      const img = e.target instanceof HTMLElement ? e.target.closest('img') : null;
-      if (!(img instanceof HTMLImageElement)) return;
+      const img = asImg(asEl(e.target)?.closest('img'));
+      if (!img) return;
       const view = this.app.workspace.getActiveViewOfType(MarkdownView);
       if (!view?.file || !view.contentEl.contains(img)) return;
       if ((window.getSelection()?.toString().trim().length ?? 0) > 0) return;
@@ -92,9 +93,8 @@ export class MarkdownHost {
       // stealing it to show a bubble makes marked images behave unlike every
       // other image in the vault. Their comment is on hover, and the full menu
       // is on right-click.
-      const el = e.target instanceof HTMLElement ? e.target : null;
-      const hit = el?.closest('.at-hl') ?? null;
-      if (!(hit instanceof HTMLElement)) return;
+      const hit = asEl(asEl(e.target)?.closest('.at-hl'));
+      if (!hit) return;
       if ((window.getSelection()?.toString().trim().length ?? 0) > 0) return;
       // A mark inside a transclusion belongs to the note it came from, so
       // that is where to look it up — the host has never heard of it.
@@ -217,7 +217,7 @@ export class MarkdownHost {
   private selectionElement(): HTMLElement | null {
     const node = window.getSelection()?.anchorNode ?? null;
     if (!node) return null;
-    return node instanceof HTMLElement ? node : node.parentElement;
+    return elementOf(node);
   }
 
   /**
@@ -227,8 +227,8 @@ export class MarkdownHost {
    * from, which is enough to resolve the real file.
    */
   private embeddedFileAt(el: HTMLElement | null, host: TFile): TFile | null {
-    const container = el?.closest('.internal-embed, .markdown-embed');
-    if (!(container instanceof HTMLElement)) return null;
+    const container = asEl(el?.closest('.internal-embed, .markdown-embed'));
+    if (!container) return null;
     const link = container.getAttribute('src') ?? container.getAttribute('data-href') ?? '';
     if (!link) return null;
     const target = this.app.metadataCache.getFirstLinkpathDest(link.split('#')[0], host.path);
@@ -270,15 +270,15 @@ export class MarkdownHost {
     const file = info.file;
     if (!file) return;
 
-    const existing = this.lastTarget?.closest('.at-hl');
-    if (existing instanceof HTMLElement) {
+    const existing = asEl(this.lastTarget?.closest('.at-hl'));
+    if (existing) {
       this.addExistingItems(menu, this.embeddedFileAt(existing, file) ?? file, existing);
       return;
     }
 
     // A picture can't be selected, so right-clicking one is the way in.
-    const img = this.lastTarget?.closest('img');
-    if (img instanceof HTMLImageElement) {
+    const img = asImg(this.lastTarget?.closest('img'));
+    if (img) {
       this.addImageItems(menu, file, img);
       return;
     }
@@ -294,11 +294,11 @@ export class MarkdownHost {
     if (!file) return;
     const menu = new Menu();
 
-    const existing = this.lastTarget?.closest('.at-hl');
-    const img = this.lastTarget?.closest('img');
-    if (existing instanceof HTMLElement) {
+    const existing = asEl(this.lastTarget?.closest('.at-hl'));
+    const img = asImg(this.lastTarget?.closest('img'));
+    if (existing) {
       this.addExistingItems(menu, this.embeddedFileAt(existing, file) ?? file, existing);
-    } else if (img instanceof HTMLImageElement) {
+    } else if (img) {
       this.addImageItems(menu, file, img);
     } else {
       const captured = await this.capture(view);
@@ -341,7 +341,7 @@ export class MarkdownHost {
   private renderedOrdinal(selection: Selection, selected: string): number {
     const sel = selection.getRangeAt(0);
     const node = sel.startContainer;
-    const el = node instanceof HTMLElement ? node : node.parentElement;
+    const el = elementOf(node);
     // Count within the transclusion when inside one: its text is a file of its
     // own, and occurrences elsewhere on the page are not part of it.
     const container =

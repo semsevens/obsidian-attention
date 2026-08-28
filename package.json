@@ -1,6 +1,6 @@
 {
   "name": "obsidian-attention",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Obsidian plugin: record and revisit your attention",
   "main": "main.js",
   "scripts": {
@@ -14,6 +14,8 @@
   "author": "semsevens",
   "license": "MIT",
   "devDependencies": {
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.38.6",
     "@types/node": "^24.0.0",
     "esbuild": "0.17.3",
     "obsidian": "latest",

@@ -701,6 +701,31 @@ var import_obsidian7 = require("obsidian");
 
 // src/hosts/markdown/reveal.ts
 var import_obsidian4 = require("obsidian");
+
+// src/dom.ts
+function asEl(value) {
+  return narrow(value, HTMLElement);
+}
+function asImg(value) {
+  return narrow(value, HTMLImageElement);
+}
+function asMedia(value) {
+  return narrow(value, HTMLMediaElement);
+}
+function elementOf(node) {
+  var _a;
+  if (!node)
+    return null;
+  return (_a = asEl(node)) != null ? _a : asEl(node.parentElement);
+}
+function narrow(value, type) {
+  const node = value;
+  if (!node || typeof node.instanceOf !== "function")
+    return null;
+  return node.instanceOf(type) ? node : null;
+}
+
+// src/hosts/markdown/reveal.ts
 async function reveal(app, file, annotation) {
   if (annotation.anchor.kind === "transcript") {
     await revealInTranscript(app, file, annotation);
@@ -714,8 +739,8 @@ async function revealInTranscript(app, file, annotation) {
   const at = annotation.anchor.start;
   await app.workspace.getLeaf(false).openFile(file);
   for (let i = 0; i < 40; i++) {
-    const media = document.querySelector(".mt-view video, .mt-view audio");
-    if (media instanceof HTMLMediaElement) {
+    const media = asMedia(document.querySelector(".mt-view video, .mt-view audio"));
+    if (media) {
       const seek = () => {
         media.currentTime = at;
       };
@@ -724,8 +749,8 @@ async function revealInTranscript(app, file, annotation) {
       else
         media.addEventListener("loadedmetadata", seek, { once: true });
       void media.play();
-      const painted = document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`);
-      if (painted instanceof HTMLElement) {
+      const painted = asEl(document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`));
+      if (painted) {
         painted.scrollIntoView({ behavior: "smooth", block: "center" });
         flash(painted);
       }
@@ -757,8 +782,8 @@ async function revealInMarkdown(app, file, annotation) {
 }
 async function flashWhenPainted(view, id, tries = 20) {
   for (let i = 0; i < tries; i++) {
-    const el = view.contentEl.querySelector(`.at-hl[data-at-id="${id}"]`);
-    if (el instanceof HTMLElement) {
+    const el = asEl(view.contentEl.querySelector(`.at-hl[data-at-id="${id}"]`));
+    if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       flash(el);
       return;
@@ -1307,8 +1332,7 @@ var SelectionPopover = class {
   }
   showAt(rect, actions) {
     this.hide();
-    const el = document.createElement("div");
-    el.className = "at-popover";
+    const el = createEl("div", { cls: "at-popover" });
     const add = (label, title, fn, cls = "at-pop-btn") => {
       const b = el.createEl("button", { cls, text: label });
       b.setAttribute("aria-label", title);
@@ -1361,15 +1385,14 @@ var CommentBubble = class {
     this.el = null;
     this.dismiss = (e) => {
       var _a;
-      if (e.target instanceof Node && ((_a = this.el) == null ? void 0 : _a.contains(e.target)))
+      if ((_a = this.el) == null ? void 0 : _a.contains(asEl(e.target)))
         return;
       this.hide();
     };
   }
   showFor(rect, annotation, actions) {
     this.hide();
-    const el = document.createElement("div");
-    el.className = "at-bubble";
+    const el = createEl("div", { cls: "at-bubble" });
     const body = annotation.body;
     if (body && body.trim().length > 0)
       el.createDiv("at-bubble-body").setText(body);
@@ -1439,7 +1462,7 @@ var MarkdownHost = class {
       document,
       "contextmenu",
       (e) => {
-        this.lastTarget = e.target instanceof HTMLElement ? e.target : null;
+        this.lastTarget = asEl(e.target);
       },
       true
     );
@@ -1449,25 +1472,26 @@ var MarkdownHost = class {
       })
     );
     this.plugin.registerDomEvent(document, "mouseup", (e) => {
+      var _a;
       if (e.button !== 0 || !this.settings.popoverOnSelection)
         return;
-      if (e.target instanceof HTMLElement && e.target.closest(".at-hl, .at-popover, .at-bubble"))
+      if ((_a = asEl(e.target)) == null ? void 0 : _a.closest(".at-hl, .at-popover, .at-bubble"))
         return;
       window.setTimeout(() => {
         void this.onSelectionMade();
       }, 0);
     });
     this.plugin.registerDomEvent(document, "click", (e) => {
-      var _a, _b;
+      var _a, _b, _c;
       if (this.passingThrough)
         return;
-      const img = e.target instanceof HTMLElement ? e.target.closest("img") : null;
-      if (!(img instanceof HTMLImageElement))
+      const img = asImg((_a = asEl(e.target)) == null ? void 0 : _a.closest("img"));
+      if (!img)
         return;
       const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
       if (!(view == null ? void 0 : view.file) || !view.contentEl.contains(img))
         return;
-      if (((_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim().length) != null ? _b : 0) > 0)
+      if (((_c = (_b = window.getSelection()) == null ? void 0 : _b.toString().trim().length) != null ? _c : 0) > 0)
         return;
       e.preventDefault();
       e.stopPropagation();
@@ -1475,9 +1499,8 @@ var MarkdownHost = class {
     }, true);
     this.plugin.registerDomEvent(document, "click", (e) => {
       var _a, _b, _c, _d;
-      const el = e.target instanceof HTMLElement ? e.target : null;
-      const hit = (_a = el == null ? void 0 : el.closest(".at-hl")) != null ? _a : null;
-      if (!(hit instanceof HTMLElement))
+      const hit = asEl((_a = asEl(e.target)) == null ? void 0 : _a.closest(".at-hl"));
+      if (!hit)
         return;
       if (((_c = (_b = window.getSelection()) == null ? void 0 : _b.toString().trim().length) != null ? _c : 0) > 0)
         return;
@@ -1608,7 +1631,7 @@ var MarkdownHost = class {
     const node = (_b = (_a = window.getSelection()) == null ? void 0 : _a.anchorNode) != null ? _b : null;
     if (!node)
       return null;
-    return node instanceof HTMLElement ? node : node.parentElement;
+    return elementOf(node);
   }
   /**
    * The note transcluded around `el`, if any.
@@ -1618,8 +1641,8 @@ var MarkdownHost = class {
    */
   embeddedFileAt(el, host) {
     var _a, _b;
-    const container = el == null ? void 0 : el.closest(".internal-embed, .markdown-embed");
-    if (!(container instanceof HTMLElement))
+    const container = asEl(el == null ? void 0 : el.closest(".internal-embed, .markdown-embed"));
+    if (!container)
       return null;
     const link = (_b = (_a = container.getAttribute("src")) != null ? _a : container.getAttribute("data-href")) != null ? _b : "";
     if (!link)
@@ -1659,13 +1682,13 @@ var MarkdownHost = class {
     const file = info.file;
     if (!file)
       return;
-    const existing = (_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl");
-    if (existing instanceof HTMLElement) {
+    const existing = asEl((_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl"));
+    if (existing) {
       this.addExistingItems(menu, (_b = this.embeddedFileAt(existing, file)) != null ? _b : file, existing);
       return;
     }
-    const img = (_c = this.lastTarget) == null ? void 0 : _c.closest("img");
-    if (img instanceof HTMLImageElement) {
+    const img = asImg((_c = this.lastTarget) == null ? void 0 : _c.closest("img"));
+    if (img) {
       this.addImageItems(menu, file, img);
       return;
     }
@@ -1680,11 +1703,11 @@ var MarkdownHost = class {
     if (!file)
       return;
     const menu = new import_obsidian8.Menu();
-    const existing = (_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl");
-    const img = (_b = this.lastTarget) == null ? void 0 : _b.closest("img");
-    if (existing instanceof HTMLElement) {
+    const existing = asEl((_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl"));
+    const img = asImg((_b = this.lastTarget) == null ? void 0 : _b.closest("img"));
+    if (existing) {
       this.addExistingItems(menu, (_c = this.embeddedFileAt(existing, file)) != null ? _c : file, existing);
-    } else if (img instanceof HTMLImageElement) {
+    } else if (img) {
       this.addImageItems(menu, file, img);
     } else {
       const captured = await this.capture(view);
@@ -1725,7 +1748,7 @@ var MarkdownHost = class {
     var _a, _b;
     const sel = selection.getRangeAt(0);
     const node = sel.startContainer;
-    const el = node instanceof HTMLElement ? node : node.parentElement;
+    const el = elementOf(node);
     const container = (_b = (_a = el == null ? void 0 : el.closest(".markdown-embed-content")) != null ? _a : el == null ? void 0 : el.closest(".markdown-preview-view")) != null ? _b : el == null ? void 0 : el.closest(".cm-content");
     if (!container)
       return 0;
@@ -1930,8 +1953,7 @@ function wrap(node, from, to, annotation) {
   const tail = from > 0 ? node.splitText(from) : node;
   if (to - from < tail.data.length)
     tail.splitText(to - from);
-  const span = document.createElement("span");
-  span.className = isComment(annotation) ? "at-hl at-hl-comment" : "at-hl";
+  const span = createEl("span", { cls: isComment(annotation) ? "at-hl at-hl-comment" : "at-hl" });
   span.dataset.atId = annotation.id;
   tail.replaceWith(span);
   span.appendChild(tail);
@@ -1956,8 +1978,9 @@ function paintImages(root, annotations) {
   }
   if (targets.length === 0)
     return;
-  for (const img of Array.from(root.querySelectorAll("img"))) {
-    if (!(img instanceof HTMLImageElement))
+  for (const raw of Array.from(root.querySelectorAll("img"))) {
+    const img = asImg(raw);
+    if (!img)
       continue;
     const src = (_b = img.getAttribute("src")) != null ? _b : "";
     const hint = srcHint(src);
@@ -2057,8 +2080,8 @@ function repaintEditors(app, provider) {
 function paintRenderedWidgets(view, provider) {
   var _a;
   const path = (_a = view.file) == null ? void 0 : _a.path;
-  const content = view.contentEl.querySelector(".cm-content");
-  if (!path || !(content instanceof HTMLElement))
+  const content = asEl(view.contentEl.querySelector(".cm-content"));
+  if (!path || !content)
     return;
   const annotations = provider(path);
   paintImages(content, annotations);
@@ -2140,8 +2163,8 @@ var AnchorTracker = class {
   schedule(path, updates) {
     const existing = this.pending.get(path);
     if (existing)
-      clearTimeout(existing);
-    this.pending.set(path, setTimeout(() => {
+      window.clearTimeout(existing);
+    this.pending.set(path, window.setTimeout(() => {
       this.pending.delete(path);
       void this.flush(path, updates);
     }, SETTLE_MS));
@@ -2153,7 +2176,7 @@ var AnchorTracker = class {
   }
   dispose() {
     for (const t of this.pending.values())
-      clearTimeout(t);
+      window.clearTimeout(t);
     this.pending.clear();
   }
 };
@@ -2165,8 +2188,8 @@ function repaintReadingViews(app, provider) {
     const view = leaf.view;
     if (!(view instanceof import_obsidian10.MarkdownView) || !view.file)
       continue;
-    const container = view.contentEl.querySelector(".markdown-preview-view");
-    if (!(container instanceof HTMLElement))
+    const container = asEl(view.contentEl.querySelector(".markdown-preview-view"));
+    if (!container)
       continue;
     const annotations = provider(view.file.path);
     paintImages(container, annotations);
@@ -2179,8 +2202,9 @@ function repaintReadingViews(app, provider) {
       const theirs = provider(note.path);
       if (theirs.length === 0)
         continue;
-      for (const box of Array.from(container.querySelectorAll(".internal-embed, .markdown-embed"))) {
-        if (!(box instanceof HTMLElement))
+      for (const raw of Array.from(container.querySelectorAll(".internal-embed, .markdown-embed"))) {
+        const box = asEl(raw);
+        if (!box)
           continue;
         paintImages(box, theirs);
         for (const a of theirs) {
@@ -2300,44 +2324,46 @@ var TranscriptHost = class {
       const detail = e.detail;
       if (!(detail == null ? void 0 : detail.mediaPath))
         return;
-      const panel = e.target instanceof HTMLElement ? (_a = e.target.querySelector(".mt-transcript")) != null ? _a : e.target : null;
-      if (panel instanceof HTMLElement)
+      const host = asEl(e.target);
+      const panel = (_a = asEl(host == null ? void 0 : host.querySelector(".mt-transcript"))) != null ? _a : host;
+      if (panel)
         void this.repaint(panel);
     };
     document.addEventListener(TRANSCRIPT_RENDERED, onRendered);
     this.plugin.register(() => document.removeEventListener(TRANSCRIPT_RENDERED, onRendered));
     this.plugin.register(this.store.onChange((path) => this.repaintOpenPanels(path)));
     this.plugin.registerDomEvent(document, "mouseup", (e) => {
+      var _a;
       if (e.button !== 0 || !this.settings.popoverOnSelection)
         return;
       if (!this.inTranscript(e.target))
         return;
-      if (e.target instanceof HTMLElement && e.target.closest(".at-hl, .at-popover, .at-bubble"))
+      if ((_a = asEl(e.target)) == null ? void 0 : _a.closest(".at-hl, .at-popover, .at-bubble"))
         return;
       window.setTimeout(() => {
         void this.onSelectionMade();
       }, 0);
     });
     this.plugin.registerDomEvent(document, "click", (e) => {
-      var _a, _b;
-      const hit = e.target instanceof HTMLElement ? e.target.closest(".at-hl") : null;
-      if (!(hit instanceof HTMLElement) || !this.inTranscript(hit))
+      var _a, _b, _c;
+      const hit = asEl((_a = asEl(e.target)) == null ? void 0 : _a.closest(".at-hl"));
+      if (!hit || !this.inTranscript(hit))
         return;
-      if (((_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim().length) != null ? _b : 0) > 0)
+      if (((_c = (_b = window.getSelection()) == null ? void 0 : _b.toString().trim().length) != null ? _c : 0) > 0)
         return;
       void this.showBubble(hit);
     });
     const onContextMenu = (e) => {
-      var _a, _b;
+      var _a, _b, _c;
       if (!this.inTranscript(e.target))
         return;
-      const hit = e.target instanceof HTMLElement ? e.target.closest(".at-hl") : null;
-      const selected = (_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim()) != null ? _b : "";
+      const hit = asEl((_a = asEl(e.target)) == null ? void 0 : _a.closest(".at-hl"));
+      const selected = (_c = (_b = window.getSelection()) == null ? void 0 : _b.toString().trim()) != null ? _c : "";
       if (!hit && selected.length === 0)
         return;
       e.preventDefault();
       e.stopPropagation();
-      void this.showMenu(e, hit instanceof HTMLElement ? hit : null);
+      void this.showMenu(e, hit);
     };
     document.addEventListener("contextmenu", onContextMenu, true);
     this.plugin.register(() => document.removeEventListener("contextmenu", onContextMenu, true));
@@ -2357,28 +2383,27 @@ var TranscriptHost = class {
    * kept only in a handler is state you can miss.
    */
   panelOf(target) {
-    var _a, _b;
-    if (!(target instanceof HTMLElement))
+    var _a, _b, _c;
+    const panel = asEl((_a = asEl(target)) == null ? void 0 : _a.closest(".mt-transcript"));
+    if (!panel)
       return null;
-    const panel = target.closest(".mt-transcript");
-    if (!(panel instanceof HTMLElement))
-      return null;
-    const mediaPath = (_a = panel.dataset.mtMedia) != null ? _a : "";
+    const mediaPath = (_b = panel.dataset.mtMedia) != null ? _b : "";
     if (!mediaPath)
       return null;
-    return { panel, mediaPath, trackPath: (_b = panel.dataset.mtTrack) != null ? _b : "" };
+    return { panel, mediaPath, trackPath: (_c = panel.dataset.mtTrack) != null ? _c : "" };
   }
   // ── Painting ───────────────────────────────────────────────────────────────
   /** Read the transcript out of the DOM the other plugin rendered. */
   readSegments(panel) {
     const out = [];
-    for (const el of Array.from(panel.querySelectorAll(".mt-segment"))) {
-      if (!(el instanceof HTMLElement))
+    for (const raw of Array.from(panel.querySelectorAll(".mt-segment"))) {
+      const el = asEl(raw);
+      if (!el)
         continue;
-      const txt = el.querySelector(".mt-txt");
+      const txt = asEl(el.querySelector(".mt-txt"));
       const seg = Number(el.dataset.mtSeg);
       const start = Number(el.dataset.mtStart);
-      if (!(txt instanceof HTMLElement) || !Number.isFinite(seg))
+      if (!txt || !Number.isFinite(seg))
         continue;
       out.push({ el, txt, seg: { seg, start, text: txt.innerText } });
     }
@@ -2407,28 +2432,28 @@ var TranscriptHost = class {
     }
   }
   repaintOpenPanels(mediaPath) {
-    for (const panel of Array.from(document.querySelectorAll(".mt-transcript"))) {
-      if (panel instanceof HTMLElement && panel.dataset.mtMedia === mediaPath) {
+    for (const raw of Array.from(document.querySelectorAll(".mt-transcript"))) {
+      const panel = asEl(raw);
+      if ((panel == null ? void 0 : panel.dataset.mtMedia) === mediaPath)
         void this.repaint(panel);
-      }
     }
   }
   // ── Capture ────────────────────────────────────────────────────────────────
   /** Turn the current selection into an anchor, if it sits inside one line. */
   capture() {
-    var _a, _b;
+    var _a;
     const selection = window.getSelection();
     const selected = (_a = selection == null ? void 0 : selection.toString()) != null ? _a : "";
     if (!selection || selected.trim().length === 0)
       return null;
     const node = selection.anchorNode;
-    const el = (_b = node instanceof HTMLElement ? node : node == null ? void 0 : node.parentElement) != null ? _b : null;
+    const el = elementOf(node);
     const where = this.panelOf(el);
     if (!where)
       return null;
-    const segEl = el == null ? void 0 : el.closest(".mt-segment");
-    const txt = segEl == null ? void 0 : segEl.querySelector(".mt-txt");
-    if (!(segEl instanceof HTMLElement) || !(txt instanceof HTMLElement))
+    const segEl = asEl(el == null ? void 0 : el.closest(".mt-segment"));
+    const txt = asEl(segEl == null ? void 0 : segEl.querySelector(".mt-txt"));
+    if (!segEl || !txt)
       return null;
     const text = txt.innerText;
     const at = text.indexOf(selected);

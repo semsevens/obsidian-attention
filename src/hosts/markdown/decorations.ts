@@ -6,8 +6,8 @@ import { resolveMarkdown } from '../../anchor/resolveAnchor';
 import { paintQuote } from '../paintQuote';
 import { paintImages } from '../paintImage';
 import { Change } from '../../anchor/repair';
-import { transcludedNotes } from '../../store/transclusions';
 import { strip } from '../../anchor/plainText';
+import { asEl } from '../../dom';
 
 /**
  * Highlights for Live Preview and source mode.
@@ -145,8 +145,8 @@ export function repaintEditors(app: App, provider?: Provider): void {
  */
 function paintRenderedWidgets(view: MarkdownView, provider: Provider): void {
   const path = view.file?.path;
-  const content = view.contentEl.querySelector('.cm-content');
-  if (!path || !(content instanceof HTMLElement)) return;
+  const content = asEl(view.contentEl.querySelector('.cm-content'));
+  if (!path || !content) return;
 
   const annotations = provider(path);
   paintImages(content, annotations);

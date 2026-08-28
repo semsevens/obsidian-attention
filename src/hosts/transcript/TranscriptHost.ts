@@ -7,6 +7,7 @@ import { CommentBubble } from '../../ui/CommentBubble';
 import { CommentModal } from '../../ui/CommentModal';
 import { AttentionSettings } from '../../settings';
 import { paintQuote } from '../paintQuote';
+import { asEl, elementOf } from '../../dom';
 
 /** Announced by obsidian-media-transcript whenever it rebuilds its transcript. */
 const TRANSCRIPT_RENDERED = 'mt:transcript-rendered';
@@ -42,10 +43,9 @@ export class TranscriptHost {
     const onRendered = (e: Event) => {
       const detail = (e as CustomEvent).detail as { mediaPath?: string } | null;
       if (!detail?.mediaPath) return;
-      const panel = e.target instanceof HTMLElement
-        ? e.target.querySelector('.mt-transcript') ?? e.target
-        : null;
-      if (panel instanceof HTMLElement) void this.repaint(panel);
+      const host = asEl(e.target);
+      const panel = asEl(host?.querySelector('.mt-transcript')) ?? host;
+      if (panel) void this.repaint(panel);
     };
     document.addEventListener(TRANSCRIPT_RENDERED, onRendered);
     this.plugin.register(() => document.removeEventListener(TRANSCRIPT_RENDERED, onRendered));
@@ -56,13 +56,13 @@ export class TranscriptHost {
     this.plugin.registerDomEvent(document, 'mouseup', e => {
       if (e.button !== 0 || !this.settings.popoverOnSelection) return;
       if (!this.inTranscript(e.target)) return;
-      if (e.target instanceof HTMLElement && e.target.closest('.at-hl, .at-popover, .at-bubble')) return;
+      if (asEl(e.target)?.closest('.at-hl, .at-popover, .at-bubble')) return;
       window.setTimeout(() => { void this.onSelectionMade(); }, 0);
     });
 
     this.plugin.registerDomEvent(document, 'click', e => {
-      const hit = e.target instanceof HTMLElement ? e.target.closest('.at-hl') : null;
-      if (!(hit instanceof HTMLElement) || !this.inTranscript(hit)) return;
+      const hit = asEl(asEl(e.target)?.closest('.at-hl'));
+      if (!hit || !this.inTranscript(hit)) return;
       if ((window.getSelection()?.toString().trim().length ?? 0) > 0) return;
       void this.showBubble(hit);
     });
@@ -73,12 +73,12 @@ export class TranscriptHost {
     // stop it; otherwise we leave it entirely alone.
     const onContextMenu = (e: MouseEvent) => {
       if (!this.inTranscript(e.target)) return;
-      const hit = e.target instanceof HTMLElement ? e.target.closest('.at-hl') : null;
+      const hit = asEl(asEl(e.target)?.closest('.at-hl'));
       const selected = window.getSelection()?.toString().trim() ?? '';
       if (!hit && selected.length === 0) return;
       e.preventDefault();
       e.stopPropagation();
-      void this.showMenu(e, hit instanceof HTMLElement ? hit : null);
+      void this.showMenu(e, hit);
     };
     document.addEventListener('contextmenu', onContextMenu, true);
     this.plugin.register(() => document.removeEventListener('contextmenu', onContextMenu, true));
@@ -101,9 +101,8 @@ export class TranscriptHost {
    * kept only in a handler is state you can miss.
    */
   private panelOf(target: EventTarget | null): { panel: HTMLElement; mediaPath: string; trackPath: string } | null {
-    if (!(target instanceof HTMLElement)) return null;
-    const panel = target.closest('.mt-transcript');
-    if (!(panel instanceof HTMLElement)) return null;
+    const panel = asEl(asEl(target)?.closest('.mt-transcript'));
+    if (!panel) return null;
     const mediaPath = panel.dataset.mtMedia ?? '';
     if (!mediaPath) return null;
     return { panel, mediaPath, trackPath: panel.dataset.mtTrack ?? '' };
@@ -114,12 +113,13 @@ export class TranscriptHost {
   /** Read the transcript out of the DOM the other plugin rendered. */
   private readSegments(panel: HTMLElement): { el: HTMLElement; txt: HTMLElement; seg: Seg }[] {
     const out: { el: HTMLElement; txt: HTMLElement; seg: Seg }[] = [];
-    for (const el of Array.from(panel.querySelectorAll('.mt-segment'))) {
-      if (!(el instanceof HTMLElement)) continue;
-      const txt = el.querySelector('.mt-txt');
+    for (const raw of Array.from(panel.querySelectorAll('.mt-segment'))) {
+      const el = asEl(raw);
+      if (!el) continue;
+      const txt = asEl(el.querySelector('.mt-txt'));
       const seg = Number(el.dataset.mtSeg);
       const start = Number(el.dataset.mtStart);
-      if (!(txt instanceof HTMLElement) || !Number.isFinite(seg)) continue;
+      if (!txt || !Number.isFinite(seg)) continue;
       out.push({ el, txt, seg: { seg, start, text: txt.innerText } });
     }
     return out;
@@ -147,10 +147,9 @@ export class TranscriptHost {
   }
 
   private repaintOpenPanels(mediaPath: string): void {
-    for (const panel of Array.from(document.querySelectorAll('.mt-transcript'))) {
-      if (panel instanceof HTMLElement && panel.dataset.mtMedia === mediaPath) {
-        void this.repaint(panel);
-      }
+    for (const raw of Array.from(document.querySelectorAll('.mt-transcript'))) {
+      const panel = asEl(raw);
+      if (panel?.dataset.mtMedia === mediaPath) void this.repaint(panel);
     }
   }
 
@@ -163,12 +162,12 @@ export class TranscriptHost {
     if (!selection || selected.trim().length === 0) return null;
 
     const node = selection.anchorNode;
-    const el = (node instanceof HTMLElement ? node : node?.parentElement) ?? null;
+    const el = elementOf(node);
     const where = this.panelOf(el);
     if (!where) return null;
-    const segEl = el?.closest('.mt-segment');
-    const txt = segEl?.querySelector('.mt-txt');
-    if (!(segEl instanceof HTMLElement) || !(txt instanceof HTMLElement)) return null;
+    const segEl = asEl(el?.closest('.mt-segment'));
+    const txt = asEl(segEl?.querySelector('.mt-txt'));
+    if (!segEl || !txt) return null;
 
     const text = txt.innerText;
     const at = text.indexOf(selected);

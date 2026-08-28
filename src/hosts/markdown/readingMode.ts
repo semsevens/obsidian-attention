@@ -4,6 +4,7 @@ import { paintQuote } from '../paintQuote';
 import { strip } from '../../anchor/plainText';
 import { paintImages } from '../paintImage';
 import { transcludedNotes } from '../../store/transclusions';
+import { asEl } from '../../dom';
 
 /**
  * Highlights for reading mode.
@@ -32,8 +33,8 @@ export function repaintReadingViews(app: App, provider: Provider): void {
   for (const leaf of app.workspace.getLeavesOfType('markdown')) {
     const view = leaf.view;
     if (!(view instanceof MarkdownView) || !view.file) continue;
-    const container = view.contentEl.querySelector('.markdown-preview-view');
-    if (!(container instanceof HTMLElement)) continue;
+    const container = asEl(view.contentEl.querySelector('.markdown-preview-view'));
+    if (!container) continue;
 
     const annotations = provider(view.file.path);
     paintImages(container, annotations);
@@ -47,8 +48,9 @@ export function repaintReadingViews(app: App, provider: Provider): void {
     for (const note of transcludedNotes(app, view.file)) {
       const theirs = provider(note.path);
       if (theirs.length === 0) continue;
-      for (const box of Array.from(container.querySelectorAll('.internal-embed, .markdown-embed'))) {
-        if (!(box instanceof HTMLElement)) continue;
+      for (const raw of Array.from(container.querySelectorAll('.internal-embed, .markdown-embed'))) {
+        const box = asEl(raw);
+        if (!box) continue;
         paintImages(box, theirs);
         for (const a of theirs) {
           if (a.anchor.kind !== 'markdown') continue;

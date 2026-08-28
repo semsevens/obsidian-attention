@@ -75,8 +75,7 @@ function wrap(node: Text, from: number, to: number, annotation: Annotation): voi
   const tail = from > 0 ? node.splitText(from) : node;
   if (to - from < tail.data.length) tail.splitText(to - from);
 
-  const span = document.createElement('span');
-  span.className = isComment(annotation) ? 'at-hl at-hl-comment' : 'at-hl';
+  const span = createEl('span', { cls: isComment(annotation) ? 'at-hl at-hl-comment' : 'at-hl' });
   span.dataset.atId = annotation.id;
   tail.replaceWith(span);
   span.appendChild(tail);

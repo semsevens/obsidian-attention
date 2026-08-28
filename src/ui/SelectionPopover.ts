@@ -21,8 +21,7 @@ export class SelectionPopover {
   showAt(rect: DOMRect, actions: PopoverActions): void {
     this.hide();
 
-    const el = document.createElement('div');
-    el.className = 'at-popover';
+    const el = createEl('div', { cls: 'at-popover' });
 
     const add = (label: string, title: string, fn: () => void, cls = 'at-pop-btn') => {
       const b = el.createEl('button', { cls, text: label });
