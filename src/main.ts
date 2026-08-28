@@ -9,6 +9,7 @@ import {
   saveSidecar,
   sidecarPathFor,
   isSidecarPath,
+  targetPathFor,
 } from './store/sidecar';
 import { AnnotationStore } from './store/annotationStore';
 import { MarkdownHost } from './hosts/markdown/MarkdownHost';
@@ -89,6 +90,52 @@ export default class AttentionPlugin extends Plugin {
     document.body.style.setProperty('--at-color', this.settings.markColor);
   }
 
+  /**
+   * Opening a sidecar opens what it annotates instead.
+   *
+   * `<note>.anno.json` is plumbing — nobody clicks it wanting to read JSON, and
+   * `.json` is claimed by whichever plugin registered the extension, which then
+   * has to explain a file it knows nothing about. Redirecting keeps that
+   * knowledge here, where the naming convention lives.
+   */
+  private async redirectSidecar(file: TFile): Promise<boolean> {
+    if (!isSidecarPath(file.path)) return false;
+    const targetPath = targetPathFor(file.path);
+    const target = targetPath && this.app.vault.getAbstractFileByPath(targetPath);
+
+    if (!(target instanceof TFile)) {
+      // The annotated file is gone; the sidecar is all that's left of it.
+      new Notice(
+        `Attention: “${targetPath ?? file.name}” no longer exists. ` +
+          'Its marks are still here — delete this file to discard them.',
+      );
+      return false;
+    }
+
+    this.replaceOpenFile(file.path, target);
+    return true;
+  }
+
+  /**
+   * Swap what a leaf is showing, once Obsidian has finished putting it there.
+   *
+   * This runs from inside `file-open`, and Obsidian completes its own open
+   * *after* the handler returns — an openFile issued here is quietly undone a
+   * moment later, which looks exactly like the redirect never firing. Deferring
+   * by a fixed delay works but bets on a number; retrying until the leaf
+   * actually moved is the same idea without the guess, and stops on its own if
+   * the reader navigates somewhere else first.
+   */
+  private replaceOpenFile(from: string, target: TFile): void {
+    let attempts = 0;
+    const attempt = () => {
+      if (this.app.workspace.getActiveFile()?.path !== from) return; // moved on
+      void this.app.workspace.getLeaf(false).openFile(target);
+      if (++attempts < 8) window.setTimeout(attempt, 40);
+    };
+    window.setTimeout(attempt, 0);
+  }
+
   private async onLayoutReady(): Promise<void> {
     await this.rebuildIndex();
     // Notes open at load time never fire `file-open`, so without this their
@@ -107,6 +154,7 @@ export default class AttentionPlugin extends Plugin {
   }
 
   private async onFileOpen(file: TFile): Promise<void> {
+    if (await this.redirectSidecar(file)) return;
     await this.store.warm(file.path);
     if (!this.settings.autoRevealPanel) return;
     if (this.store.peek(file.path).length === 0) return;

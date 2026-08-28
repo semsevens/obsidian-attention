@@ -1809,6 +1809,50 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
   applyMarkColor() {
     document.body.style.setProperty("--at-color", this.settings.markColor);
   }
+  /**
+   * Opening a sidecar opens what it annotates instead.
+   *
+   * `<note>.anno.json` is plumbing — nobody clicks it wanting to read JSON, and
+   * `.json` is claimed by whichever plugin registered the extension, which then
+   * has to explain a file it knows nothing about. Redirecting keeps that
+   * knowledge here, where the naming convention lives.
+   */
+  async redirectSidecar(file) {
+    if (!isSidecarPath(file.path))
+      return false;
+    const targetPath = targetPathFor(file.path);
+    const target = targetPath && this.app.vault.getAbstractFileByPath(targetPath);
+    if (!(target instanceof import_obsidian10.TFile)) {
+      new import_obsidian10.Notice(
+        `Attention: \u201C${targetPath != null ? targetPath : file.name}\u201D no longer exists. Its marks are still here \u2014 delete this file to discard them.`
+      );
+      return false;
+    }
+    this.replaceOpenFile(file.path, target);
+    return true;
+  }
+  /**
+   * Swap what a leaf is showing, once Obsidian has finished putting it there.
+   *
+   * This runs from inside `file-open`, and Obsidian completes its own open
+   * *after* the handler returns — an openFile issued here is quietly undone a
+   * moment later, which looks exactly like the redirect never firing. Deferring
+   * by a fixed delay works but bets on a number; retrying until the leaf
+   * actually moved is the same idea without the guess, and stops on its own if
+   * the reader navigates somewhere else first.
+   */
+  replaceOpenFile(from, target) {
+    let attempts = 0;
+    const attempt = () => {
+      var _a;
+      if (((_a = this.app.workspace.getActiveFile()) == null ? void 0 : _a.path) !== from)
+        return;
+      void this.app.workspace.getLeaf(false).openFile(target);
+      if (++attempts < 8)
+        window.setTimeout(attempt, 40);
+    };
+    window.setTimeout(attempt, 0);
+  }
   async onLayoutReady() {
     await this.rebuildIndex();
     await this.warmOpenFiles();
@@ -1823,6 +1867,8 @@ var AttentionPlugin = class extends import_obsidian10.Plugin {
     await Promise.all([...paths].map((p) => this.store.warm(p)));
   }
   async onFileOpen(file) {
+    if (await this.redirectSidecar(file))
+      return;
     await this.store.warm(file.path);
     if (!this.settings.autoRevealPanel)
       return;
