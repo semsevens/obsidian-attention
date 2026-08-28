@@ -2,6 +2,7 @@ import { App, Editor, Menu, MarkdownView, MarkdownFileInfo, Notice, Plugin, TFil
 import { MarkdownAnchor } from '../../model';
 import { describe, nthOccurrence, countOccurrences } from '../../anchor/textQuote';
 import { project, toSource } from '../../anchor/plainText';
+import { findImageEmbeds, imageMatches } from '../../anchor/imageAnchor';
 import { AnnotationStore } from '../../store/annotationStore';
 import { SelectionPopover } from '../../ui/SelectionPopover';
 import { CommentBubble } from '../../ui/CommentBubble';
@@ -67,7 +68,8 @@ export class MarkdownHost {
     // Left-click a highlight to read its comment. Guarded on an empty
     // selection so click-dragging across a highlight still just selects text.
     this.plugin.registerDomEvent(document, 'click', e => {
-      const hit = e.target instanceof HTMLElement ? e.target.closest('.at-hl') : null;
+      const el = e.target instanceof HTMLElement ? e.target : null;
+      const hit = el?.closest('.at-hl') ?? (el?.matches('img.at-img') ? el : null);
       if (!(hit instanceof HTMLElement)) return;
       if ((window.getSelection()?.toString().trim().length ?? 0) > 0) return;
       const file = this.app.workspace.getActiveViewOfType(MarkdownView)?.file;
@@ -106,6 +108,7 @@ export class MarkdownHost {
 
   private hasSomethingToOffer(view: MarkdownView): boolean {
     if (this.lastTarget?.closest('.at-hl')) return true;
+    if (this.lastTarget?.closest('img')) return true;
     const selection = window.getSelection();
     return (
       (selection?.toString().trim().length ?? 0) > 0 &&
@@ -158,6 +161,13 @@ export class MarkdownHost {
       return;
     }
 
+    // A picture can't be selected, so right-clicking one is the way in.
+    const img = this.lastTarget?.closest('img');
+    if (img instanceof HTMLImageElement) {
+      this.addImageItems(menu, file, img);
+      return;
+    }
+
     const anchor = this.captureEditor(editor);
     if (anchor) this.addCreateItems(menu, file, anchor);
   }
@@ -170,8 +180,11 @@ export class MarkdownHost {
     const menu = new Menu();
 
     const existing = this.lastTarget?.closest('.at-hl');
+    const img = this.lastTarget?.closest('img');
     if (existing instanceof HTMLElement) {
       this.addExistingItems(menu, file, existing);
+    } else if (img instanceof HTMLImageElement) {
+      this.addImageItems(menu, file, img);
     } else {
       const anchor = await this.captureRendered(view, file);
       if (!anchor) return;
@@ -261,6 +274,58 @@ export class MarkdownHost {
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
+
+  /** Menu for a rendered image: mark the picture itself. */
+  private addImageItems(menu: Menu, file: TFile, img: HTMLImageElement): void {
+    const id = img.dataset.atId;
+    if (id) {
+      menu.addItem(i => i.setTitle('Edit comment…').setIcon('message-square')
+        .onClick(() => { void this.editComment(file, id); }));
+      menu.addItem(i => i.setTitle('Mark again').setIcon('plus')
+        .onClick(() => { void this.markAgain(file.path, id); }));
+      menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
+        .onClick(() => { void this.store.remove(file.path, id); }));
+      return;
+    }
+
+    menu.addItem(i => i.setTitle('Mark image').setIcon('highlighter')
+      .onClick(() => { void this.markImage(file, img, null); }));
+    menu.addItem(i => i.setTitle('Comment on image…').setIcon('message-square')
+      .onClick(() => {
+        new CommentModal(this.app, '🖼 ' + (img.getAttribute('alt') || 'image'), '', body => {
+          void this.markImage(file, img, body || null);
+        }).open();
+      }));
+  }
+
+  /**
+   * Anchor a picture by the embed that produced it.
+   *
+   * Matched on what the image points at rather than by counting images: Live
+   * Preview only renders the widgets near the viewport, so a positional count
+   * would be wrong exactly when the note is long enough for it to matter. The
+   * same picture used twice is told apart by order among its own duplicates.
+   */
+  private async markImage(file: TFile, img: HTMLImageElement, body: string | null): Promise<void> {
+    const source = await this.app.vault.cachedRead(file);
+    const src = img.getAttribute('src') ?? '';
+    const candidates = findImageEmbeds(source).filter(e => imageMatches(src, e.target));
+
+    if (candidates.length === 0) {
+      new Notice('Attention: could not find that image in the note.');
+      return;
+    }
+
+    let embed = candidates[0];
+    if (candidates.length > 1) {
+      const same = Array.from(document.querySelectorAll('img'))
+        .filter(other => other.getAttribute('src') === src);
+      const ordinal = same.indexOf(img);
+      embed = candidates[Math.min(Math.max(ordinal, 0), candidates.length - 1)];
+    }
+
+    await this.mark(file, { kind: 'markdown', ...describe(source, embed.from, embed.to) }, body);
+  }
 
   private promptComment(file: TFile, anchor: MarkdownAnchor, initial: string): void {
     new CommentModal(this.app, anchor.quote, initial, body => {

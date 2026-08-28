@@ -4,6 +4,7 @@ import { App, MarkdownView, editorInfoField } from 'obsidian';
 import { Annotation, MarkdownAnchor, isComment } from '../../model';
 import { resolve } from '../../anchor/textQuote';
 import { paintQuote } from '../paintQuote';
+import { paintImages } from '../paintImage';
 import { Change } from '../../anchor/repair';
 
 /**
@@ -145,7 +146,9 @@ function paintRenderedWidgets(view: MarkdownView, provider: Provider): void {
   const content = view.contentEl.querySelector('.cm-content');
   if (!path || !(content instanceof HTMLElement)) return;
 
-  for (const a of provider(path)) {
+  const annotations = provider(path);
+  paintImages(content, annotations);
+  for (const a of annotations) {
     if (a.anchor.kind !== 'markdown') continue;
     paintQuote(content, a);
   }

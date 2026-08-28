@@ -358,3 +358,23 @@ body.at-style-background .at-hl:hover {
   resize: vertical;
   font-family: inherit;
 }
+
+/* ── Marked images ─────────────────────────────────────────────────────────── */
+
+/* A picture can't be underlined, so it gets a ring. Inset, so a marked image
+   doesn't shift the text around it. */
+.at-img {
+  outline: 3px solid var(--at-color, #f5c542);
+  outline-offset: -3px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.at-img-comment {
+  outline-style: double;
+  outline-width: 5px;
+}
+
+.at-img:hover {
+  outline-color: var(--interactive-accent);
+}

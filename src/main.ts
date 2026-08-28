@@ -20,7 +20,7 @@ import {
   setDriftListener,
 } from './hosts/markdown/decorations';
 import { AnchorTracker } from './anchor/AnchorTracker';
-import { readingModeHighlighter } from './hosts/markdown/readingMode';
+import { readingModeHighlighter, repaintReadingViews } from './hosts/markdown/readingMode';
 import { TranscriptHost } from './hosts/transcript/TranscriptHost';
 
 export default class AttentionPlugin extends Plugin {
@@ -184,6 +184,12 @@ export default class AttentionPlugin extends Plugin {
 
     this.registerEditorExtension(annotationDecorations(provider));
     this.registerMarkdownPostProcessor(readingModeHighlighter(provider));
+
+    // Switching into reading mode can reuse a render made before a mark
+    // existed, so paint over whatever is on screen when the layout settles.
+    this.registerEvent(this.app.workspace.on('layout-change', () => {
+      repaintReadingViews(this.app, provider);
+    }));
 
     this.markdownHost = new MarkdownHost(this.app, this, this.store, this.settings);
     this.markdownHost.register();
