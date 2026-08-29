@@ -200,7 +200,7 @@ export default class AttentionPlugin extends Plugin {
     this.register(() => { setEditListener(null); setDriftListener(null); });
 
     this.registerEditorExtension(annotationDecorations(provider));
-    this.registerMarkdownPostProcessor(readingModeHighlighter(this.app, provider));
+    this.registerMarkdownPostProcessor(readingModeHighlighter(provider));
 
     // Switching into reading mode can reuse a render made before a mark
     // existed, so paint over whatever is on screen when the layout settles.

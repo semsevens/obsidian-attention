@@ -153,8 +153,25 @@ async function revealInMarkdown(
     return;
   }
 
-  // Reading mode renders asynchronously, so the span may not exist yet.
+  // Reading mode renders lazily, so the mark's paragraph may not be in the
+  // document at all — and then there is no painted span to scroll to, however
+  // long you wait for one. Scroll by source line instead, which makes Obsidian
+  // render that part of the note; the span appears as a result, not before.
+  if (annotation.anchor.kind === 'markdown') {
+    const source = await app.vault.cachedRead(file);
+    const at = resolveMarkdown(source, annotation.anchor);
+    if (at) view.previewMode.applyScroll(lineAt(source, at.from));
+  }
   await flashWhenPainted(view, annotation.id);
+}
+
+/** Which line of the source an offset falls on, counting from zero. */
+function lineAt(source: string, offset: number): number {
+  let line = 0;
+  for (let i = 0; i < offset && i < source.length; i++) {
+    if (source[i] === '\n') line++;
+  }
+  return line;
 }
 
 /**

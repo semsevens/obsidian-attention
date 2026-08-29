@@ -1,7 +1,7 @@
 import { App, Editor, Menu, MarkdownView, MarkdownFileInfo, Notice, Plugin, TFile } from 'obsidian';
 import { MarkdownAnchor } from '../../model';
 import { describe, nthOccurrence, countOccurrences } from '../../anchor/textQuote';
-import { project, toSource } from '../../anchor/plainText';
+import { Projection, project, toSource } from '../../anchor/plainText';
 import {
   findImageEmbeds, imageMatches, embedBySurroundings, srcHint, ImageEmbed,
 } from '../../anchor/imageAnchor';
@@ -13,6 +13,7 @@ import { AttentionSettings } from '../../settings';
 import { asEl, asImg, elementOf } from '../../dom';
 import { belongsTo, ownerOf } from './ownerView';
 import { isChrome, textBefore } from './renderedText';
+import { blockAround, sourceRangeOf } from './section';
 import { bodyStart, snapRange } from '../../anchor/snapRange';
 import { WrongNoteError } from '../../store/annotationStore';
 
@@ -352,21 +353,70 @@ export class MarkdownHost {
     // refuse any selection containing emphasis, a link or a highlight, which in
     // a real note is most of them.
     const plain = project(source);
-    // Search the body only. Reading mode draws the frontmatter as well — as a
-    // properties table, and again as a block when that is switched on — but
-    // those are not part of the document, and the ordinal counted on screen
-    // skips them. Leaving them in here would make the same phrase land in the
-    // frontmatter, which is a place no mark can live.
-    const body = plain.map.findIndex(at => at >= bodyStart(source));
-    const from = body < 0 ? 0 : body;
-    const at = nthOccurrence(plain.text.slice(from), selected, this.renderedOrdinal(selection, selected));
+
+    // Search the block the reader was pointing at, when reading mode has told
+    // us which one that is. Searching the whole note instead means finding the
+    // nth occurrence, and the count is taken from the screen — where Obsidian
+    // also draws the properties table, the frontmatter, and only the paragraphs
+    // it has got around to rendering. Every one of those has, at some point,
+    // moved the answer. Within one block there is nothing else to confuse it.
+    const window_ = this.searchWindow(plain, source, selection);
+    const at = nthOccurrence(
+      plain.text.slice(window_.from, window_.to),
+      selected,
+      window_.ordinal,
+    );
     if (at < 0) {
       new Notice('Attention: could not find that selection in the note.');
       return null;
     }
-    const range = toSource(plain, from + at, from + at + selected.length);
+    const start = window_.from + at;
+    const range = toSource(plain, start, start + selected.length);
     if (!range) return null;
     return this.anchorFor(source, range.from, range.to);
+  }
+
+  /**
+   * Where in the projected source to look, and which match to take.
+   *
+   * The block if we know it — one paragraph, where the reader's own ordinal is
+   * the only one that matters. Otherwise the body of the note, skipping the
+   * frontmatter, with the ordinal counted on screen; that is the older, weaker
+   * answer, kept for the views that record no line numbers.
+   */
+  private searchWindow(
+    plain: Projection,
+    source: string,
+    selection: Selection,
+  ): { from: number; to: number; ordinal: number } {
+    const block = sourceRangeOf(source, blockAround(selection.getRangeAt(0).startContainer));
+    if (block) {
+      const from = plain.map.findIndex(at => at >= block.from);
+      const after = plain.map.findIndex(at => at >= block.to);
+      return {
+        from: from < 0 ? 0 : from,
+        to: after < 0 ? plain.text.length : after,
+        ordinal: this.ordinalWithin(selection),
+      };
+    }
+
+    const body = plain.map.findIndex(at => at >= bodyStart(source));
+    return {
+      from: body < 0 ? 0 : body,
+      to: plain.text.length,
+      ordinal: this.renderedOrdinal(selection, selection.toString()),
+    };
+  }
+
+  /** How many identical matches precede the selection inside its own block. */
+  private ordinalWithin(selection: Selection): number {
+    const range = selection.getRangeAt(0);
+    const block = blockAround(range.startContainer);
+    if (!block) return 0;
+    return countOccurrences(
+      textBefore(block, range.startContainer, range.startOffset),
+      selection.toString(),
+    );
   }
 
   /**

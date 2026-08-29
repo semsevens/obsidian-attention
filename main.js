@@ -907,7 +907,21 @@ async function revealInMarkdown(app, file, annotation) {
     editor.scrollIntoView({ from, to }, true);
     return;
   }
+  if (annotation.anchor.kind === "markdown") {
+    const source = await app.vault.cachedRead(file);
+    const at = resolveMarkdown(source, annotation.anchor);
+    if (at)
+      view.previewMode.applyScroll(lineAt(source, at.from));
+  }
   await flashWhenPainted(view, annotation.id);
+}
+function lineAt(source, offset) {
+  let line = 0;
+  for (let i = 0; i < offset && i < source.length; i++) {
+    if (source[i] === "\n")
+      line++;
+  }
+  return line;
 }
 async function flashWhenPainted(view, id, tries = 20) {
   for (let i = 0; i < tries; i++) {
@@ -1860,6 +1874,51 @@ function walk(root, visit) {
   return "next";
 }
 
+// src/anchor/lines.ts
+function lineStarts(source) {
+  const starts = [0];
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === "\n")
+      starts.push(i + 1);
+  }
+  return starts;
+}
+function rangeOfLines(source, starts, from, to) {
+  var _a;
+  const first = (_a = starts[Math.max(0, Math.min(from, starts.length - 1))]) != null ? _a : 0;
+  const after = starts[to + 1];
+  return { from: first, to: after === void 0 ? source.length : after };
+}
+function intersect(a, b) {
+  const from = Math.max(a.from, b.from);
+  const to = Math.min(a.to, b.to);
+  return to > from ? { from, to } : null;
+}
+
+// src/hosts/markdown/section.ts
+var LINES_ATTR = "data-at-lines";
+function linesOf(el) {
+  const raw = el == null ? void 0 : el.getAttribute(LINES_ATTR);
+  if (!raw)
+    return null;
+  const [start, end] = raw.split(",").map(Number);
+  return Number.isFinite(start) && Number.isFinite(end) ? { start, end } : null;
+}
+function blockAround(node) {
+  for (let at = node; at; at = at.parentNode) {
+    const el = at;
+    if (typeof el.closest === "function")
+      return at.closest(`[${LINES_ATTR}]`);
+  }
+  return null;
+}
+function sourceRangeOf(source, el) {
+  const lines = linesOf(el);
+  if (!lines)
+    return null;
+  return rangeOfLines(source, lineStarts(source), lines.start, lines.end);
+}
+
 // src/hosts/markdown/MarkdownHost.ts
 var MarkdownHost = class {
   constructor(app, plugin, store, settings) {
@@ -2156,17 +2215,58 @@ var MarkdownHost = class {
       return null;
     const source = await this.app.vault.cachedRead(file);
     const plain = project(source);
-    const body = plain.map.findIndex((at2) => at2 >= bodyStart(source));
-    const from = body < 0 ? 0 : body;
-    const at = nthOccurrence(plain.text.slice(from), selected, this.renderedOrdinal(selection, selected));
+    const window_ = this.searchWindow(plain, source, selection);
+    const at = nthOccurrence(
+      plain.text.slice(window_.from, window_.to),
+      selected,
+      window_.ordinal
+    );
     if (at < 0) {
       new import_obsidian9.Notice("Attention: could not find that selection in the note.");
       return null;
     }
-    const range = toSource(plain, from + at, from + at + selected.length);
+    const start = window_.from + at;
+    const range = toSource(plain, start, start + selected.length);
     if (!range)
       return null;
     return this.anchorFor(source, range.from, range.to);
+  }
+  /**
+   * Where in the projected source to look, and which match to take.
+   *
+   * The block if we know it — one paragraph, where the reader's own ordinal is
+   * the only one that matters. Otherwise the body of the note, skipping the
+   * frontmatter, with the ordinal counted on screen; that is the older, weaker
+   * answer, kept for the views that record no line numbers.
+   */
+  searchWindow(plain, source, selection) {
+    const block = sourceRangeOf(source, blockAround(selection.getRangeAt(0).startContainer));
+    if (block) {
+      const from = plain.map.findIndex((at) => at >= block.from);
+      const after = plain.map.findIndex((at) => at >= block.to);
+      return {
+        from: from < 0 ? 0 : from,
+        to: after < 0 ? plain.text.length : after,
+        ordinal: this.ordinalWithin(selection)
+      };
+    }
+    const body = plain.map.findIndex((at) => at >= bodyStart(source));
+    return {
+      from: body < 0 ? 0 : body,
+      to: plain.text.length,
+      ordinal: this.renderedOrdinal(selection, selection.toString())
+    };
+  }
+  /** How many identical matches precede the selection inside its own block. */
+  ordinalWithin(selection) {
+    const range = selection.getRangeAt(0);
+    const block = blockAround(range.startContainer);
+    if (!block)
+      return 0;
+    return countOccurrences(
+      textBefore(block, range.startContainer, range.startOffset),
+      selection.toString()
+    );
   }
   /**
    * How many identical strings precede this selection on screen.
@@ -2664,6 +2764,20 @@ var AnchorTracker = class {
 
 // src/hosts/markdown/readingMode.ts
 var import_obsidian11 = require("obsidian");
+var LINES = "atLines";
+function readingModeHighlighter(provider) {
+  return (el, ctx) => {
+    const info = ctx.getSectionInfo(el);
+    if (info)
+      el.dataset[LINES] = `${info.lineStart},${info.lineEnd}`;
+    const annotations = provider(ctx.sourcePath);
+    if (annotations.length === 0)
+      return;
+    paintImages(el, annotations);
+    if (info)
+      paintBlock(el, info.text, annotations);
+  };
+}
 function repaintReadingViews(app, provider) {
   for (const leaf of app.workspace.getLeavesOfType("markdown")) {
     const view = leaf.view;
@@ -2672,12 +2786,12 @@ function repaintReadingViews(app, provider) {
     const container = asEl(view.contentEl.querySelector(".markdown-preview-view"));
     if (!container)
       continue;
+    const source = view.data;
     const annotations = provider(view.file.path);
-    paintImages(container, annotations);
-    for (const a of annotations) {
-      if (a.anchor.kind !== "markdown")
-        continue;
-      paintQuote(container, a, strip(a.anchor.quote));
+    if (annotations.length > 0) {
+      paintImages(container, annotations);
+      for (const block of blocksOf2(container))
+        paintBlock(block, source, annotations);
     }
     for (const note of transcludedNotes(app, view.file)) {
       const theirs = provider(note.path);
@@ -2697,28 +2811,30 @@ function repaintReadingViews(app, provider) {
     }
   }
 }
-function readingModeHighlighter(app, provider) {
-  return (el, ctx) => {
-    const annotations = provider(ctx.sourcePath);
-    if (annotations.length === 0)
-      return;
-    paintImages(el, annotations);
-    for (const a of annotations) {
-      if (a.anchor.kind !== "markdown")
-        continue;
-      paintQuote(el, a, strip(a.anchor.quote));
-    }
-    repaintSoon(app, provider);
-  };
+function blocksOf2(container) {
+  return Array.from(container.querySelectorAll(`[data-${dashed(LINES)}]`)).map(asEl).filter((el) => el !== null);
 }
-var pending = null;
-function repaintSoon(app, provider) {
-  if (pending !== null)
-    window.clearTimeout(pending);
-  pending = window.setTimeout(() => {
-    pending = null;
-    repaintReadingViews(app, provider);
-  }, 50);
+function paintBlock(el, source, annotations) {
+  var _a;
+  const lines = (_a = el.dataset[LINES]) == null ? void 0 : _a.split(",").map(Number);
+  if (!lines || lines.length !== 2 || lines.some((n) => !Number.isFinite(n)))
+    return;
+  const starts = lineStarts(source);
+  const block = rangeOfLines(source, starts, lines[0], lines[1]);
+  for (const a of annotations) {
+    if (a.anchor.kind !== "markdown")
+      continue;
+    const at = resolveMarkdown(source, a.anchor);
+    if (!at)
+      continue;
+    const piece = intersect(at, block);
+    if (!piece)
+      continue;
+    paintQuote(el, a, strip(source.slice(piece.from, piece.to)));
+  }
+}
+function dashed(name) {
+  return name.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
 }
 
 // src/hosts/transcript/TranscriptHost.ts
@@ -3390,7 +3506,7 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
       setDriftListener(null);
     });
     this.registerEditorExtension(annotationDecorations(provider));
-    this.registerMarkdownPostProcessor(readingModeHighlighter(this.app, provider));
+    this.registerMarkdownPostProcessor(readingModeHighlighter(provider));
     this.registerEvent(this.app.workspace.on("layout-change", () => {
       repaintReadingViews(this.app, provider);
     }));

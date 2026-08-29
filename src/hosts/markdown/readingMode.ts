@@ -1,33 +1,58 @@
 import { App, MarkdownPostProcessorContext, MarkdownView } from 'obsidian';
+import { Annotation } from '../../model';
 import { Provider } from './decorations';
 import { paintQuote } from '../paintQuote';
 import { strip } from '../../anchor/plainText';
 import { paintImages } from '../paintImage';
 import { transcludedNotes } from '../../store/transclusions';
 import { asEl } from '../../dom';
+import { resolveMarkdown } from '../../anchor/resolveAnchor';
+import { intersect, lineStarts, rangeOfLines } from '../../anchor/lines';
 
 /**
  * Highlights for reading mode.
  *
- * Reading mode renders markdown to HTML, so the source offsets an annotation
- * stores don't map onto anything here — `**bold**` is four characters shorter
- * once rendered. Matching is therefore done on the quote text itself.
+ * Reading mode renders markdown to HTML, and a mark is not in the file, so
+ * there is nothing for Obsidian to render — the words have to be wrapped after
+ * the fact. What matters is how the right words are found.
  *
- * The stored quote is source text, so it is stripped of markup before being
- * looked for here — otherwise a mark covering `**bold**` would search the
- * rendered DOM for asterisks that were never drawn.
+ * Not by looking for them. Searching the rendered text for a quote and taking
+ * the nth match makes the answer depend on everything else Obsidian happens to
+ * draw: the editor layer behind the reading layer, the properties table, the
+ * frontmatter block, whichever paragraphs have been rendered so far. Each of
+ * those has, at some point, made a mark land in the wrong place or nowhere.
  *
- * A quote straddling inline markup lands in several text nodes once rendered,
- * which `paintQuote` handles: it flattens the run and wraps back to front, so
- * `with **bold** here` comes out painted as three pieces rather than one.
+ * Instead Obsidian is asked directly. A post-processor is told which lines of
+ * the file the block it is handed came from, which is the one fact that ties
+ * the two together, and it does not change with scrolling or settings. A mark
+ * knows its own range in the source; the block that holds it paints the part
+ * that falls inside it. A mark spanning four paragraphs is simply four blocks
+ * each painting their own slice, with nothing to coordinate.
+ *
+ * The line range is remembered on the element, because only the post-processor
+ * is told it — everything that repaints later reads it back from there.
  */
+
+const LINES = 'atLines';
+
+export function readingModeHighlighter(provider: Provider) {
+  return (el: HTMLElement, ctx: MarkdownPostProcessorContext): void => {
+    const info = ctx.getSectionInfo(el);
+    if (info) el.dataset[LINES] = `${info.lineStart},${info.lineEnd}`;
+
+    const annotations = provider(ctx.sourcePath);
+    if (annotations.length === 0) return;
+    paintImages(el, annotations);
+    if (info) paintBlock(el, info.text, annotations);
+  };
+}
+
 /**
- * Paint the reading views that are already on screen.
+ * Paint the blocks of every reading view on screen.
  *
- * Post-processors only run when Obsidian renders a block, and switching into
- * reading mode can reuse a render made before a mark existed — leaving the mark
- * invisible until something forces a rebuild. Both painters are idempotent, so
- * running them over what's already drawn is cheap and safe.
+ * For repaints that happen outside rendering — a mark added, the layout
+ * settling, a section scrolled back into view — where there is no context to
+ * ask, only what the post-processor left behind.
  */
 export function repaintReadingViews(app: App, provider: Provider): void {
   for (const leaf of app.workspace.getLeavesOfType('markdown')) {
@@ -36,15 +61,17 @@ export function repaintReadingViews(app: App, provider: Provider): void {
     const container = asEl(view.contentEl.querySelector('.markdown-preview-view'));
     if (!container) continue;
 
+    const source = view.data;
     const annotations = provider(view.file.path);
-    paintImages(container, annotations);
-    for (const a of annotations) {
-      if (a.anchor.kind !== 'markdown') continue;
-      paintQuote(container, a, strip(a.anchor.quote));
+    if (annotations.length > 0) {
+      paintImages(container, annotations);
+      for (const block of blocksOf(container)) paintBlock(block, source, annotations);
     }
 
     // Marks belonging to notes transcluded into this one, painted inside the
-    // transclusion they came from.
+    // transclusion they came from. The host's line numbers say nothing about
+    // the embedded file, so those are still matched by their words — within
+    // the embed, which is a small enough window for that to be safe.
     for (const note of transcludedNotes(app, view.file)) {
       const theirs = provider(note.path);
       if (theirs.length === 0) continue;
@@ -61,34 +88,37 @@ export function repaintReadingViews(app: App, provider: Provider): void {
   }
 }
 
-export function readingModeHighlighter(app: App, provider: Provider) {
-  return (el: HTMLElement, ctx: MarkdownPostProcessorContext): void => {
-    const annotations = provider(ctx.sourcePath);
-    if (annotations.length === 0) return;
-
-    paintImages(el, annotations);
-    for (const a of annotations) {
-      if (a.anchor.kind !== 'markdown') continue;
-      // The stored quote is source text; what's on screen has no markup in it.
-      paintQuote(el, a, strip(a.anchor.quote));
-    }
-
-    // A block is too small a window for some marks, and there are more blocks
-    // coming. Reading mode renders lazily, so a mark further down the note is
-    // not in the document yet — and a mark spanning paragraphs is never wholly
-    // inside any one of them. Both are answered by painting the whole view
-    // once the burst of blocks has settled.
-    repaintSoon(app, provider);
-  };
+/** Every rendered block that knows where it came from. */
+function blocksOf(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll(`[data-${dashed(LINES)}]`))
+    .map(asEl)
+    .filter((el): el is HTMLElement => el !== null);
 }
 
-let pending: number | null = null;
+/**
+ * Paint the part of each mark that falls inside this block.
+ *
+ * The text handed to the painter is cut from the source and stripped of
+ * markup, so what it looks for is what the block actually shows.
+ */
+function paintBlock(el: HTMLElement, source: string, annotations: readonly Annotation[]): void {
+  const lines = el.dataset[LINES]?.split(',').map(Number);
+  if (!lines || lines.length !== 2 || lines.some(n => !Number.isFinite(n))) return;
 
-/** Coalesce the blocks Obsidian renders in a burst into one repaint. */
-function repaintSoon(app: App, provider: Provider): void {
-  if (pending !== null) window.clearTimeout(pending);
-  pending = window.setTimeout(() => {
-    pending = null;
-    repaintReadingViews(app, provider);
-  }, 50);
+  const starts = lineStarts(source);
+  const block = rangeOfLines(source, starts, lines[0], lines[1]);
+
+  for (const a of annotations) {
+    if (a.anchor.kind !== 'markdown') continue;
+    const at = resolveMarkdown(source, a.anchor);
+    if (!at) continue;
+    const piece = intersect(at, block);
+    if (!piece) continue;
+    paintQuote(el, a, strip(source.slice(piece.from, piece.to)));
+  }
+}
+
+/** `atLines` → `at-lines`, for the attribute selector. */
+function dashed(name: string): string {
+  return name.replace(/[A-Z]/g, c => '-' + c.toLowerCase());
 }
