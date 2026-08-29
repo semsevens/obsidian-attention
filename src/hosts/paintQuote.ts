@@ -1,5 +1,6 @@
 import { Annotation, isComment } from '../model';
 import { isChrome } from './markdown/renderedText';
+import { blocksOf, locateRun } from './locateRun';
 
 /**
  * Wrap occurrences of a quote inside an already-rendered element.
@@ -40,9 +41,14 @@ export function paintQuote(
     full += n.data;
   }
 
+  // A quote spanning blocks cannot be found whole: the rendered text runs
+  // paragraphs together while the stored quote keeps the blank lines. So it is
+  // looked for a block at a time, each after the last.
+  const blocks = blocksOf(quote);
+  if (blocks.length === 0) return;
+
   const spans: { node: Text; from: number; to: number }[] = [];
-  for (let at = full.indexOf(quote); at >= 0; at = full.indexOf(quote, at + quote.length)) {
-    const end = at + quote.length;
+  const cover = (at: number, end: number) => {
     for (let i = 0; i < nodes.length; i++) {
       const nodeStart = starts[i];
       const nodeEnd = nodeStart + nodes[i].data.length;
@@ -53,6 +59,13 @@ export function paintQuote(
         to: Math.min(end, nodeEnd) - nodeStart,
       });
     }
+  };
+
+  for (let from = 0; ; ) {
+    const at = locateRun(full, blocks, from);
+    if (!at) break;
+    at.forEach((start, i) => cover(start, start + blocks[i].length));
+    from = at[at.length - 1] + blocks[blocks.length - 1].length;
   }
 
   // Back to front: wrapping splits nodes, which would invalidate the offsets

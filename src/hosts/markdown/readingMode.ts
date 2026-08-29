@@ -61,15 +61,34 @@ export function repaintReadingViews(app: App, provider: Provider): void {
   }
 }
 
-export function readingModeHighlighter(provider: Provider) {
+export function readingModeHighlighter(app: App, provider: Provider) {
   return (el: HTMLElement, ctx: MarkdownPostProcessorContext): void => {
     const annotations = provider(ctx.sourcePath);
     if (annotations.length === 0) return;
+
     paintImages(el, annotations);
     for (const a of annotations) {
       if (a.anchor.kind !== 'markdown') continue;
       // The stored quote is source text; what's on screen has no markup in it.
       paintQuote(el, a, strip(a.anchor.quote));
     }
+
+    // A block is too small a window for some marks, and there are more blocks
+    // coming. Reading mode renders lazily, so a mark further down the note is
+    // not in the document yet — and a mark spanning paragraphs is never wholly
+    // inside any one of them. Both are answered by painting the whole view
+    // once the burst of blocks has settled.
+    repaintSoon(app, provider);
   };
+}
+
+let pending: number | null = null;
+
+/** Coalesce the blocks Obsidian renders in a burst into one repaint. */
+function repaintSoon(app: App, provider: Provider): void {
+  if (pending !== null) window.clearTimeout(pending);
+  pending = window.setTimeout(() => {
+    pending = null;
+    repaintReadingViews(app, provider);
+  }, 50);
 }

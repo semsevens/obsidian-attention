@@ -2354,6 +2354,25 @@ var import_view = require("@codemirror/view");
 var import_state = require("@codemirror/state");
 var import_obsidian10 = require("obsidian");
 
+// src/hosts/locateRun.ts
+function blocksOf(quote) {
+  return quote.split(/\n+/).map((line) => line.trim()).filter((line) => line.length > 0);
+}
+function locateRun(full, blocks, from = 0) {
+  if (blocks.length === 0)
+    return null;
+  const at = [];
+  let cursor = from;
+  for (const block of blocks) {
+    const found = full.indexOf(block, cursor);
+    if (found < 0)
+      return null;
+    at.push(found);
+    cursor = found + block.length;
+  }
+  return at;
+}
+
 // src/hosts/paintQuote.ts
 function paintQuote(root, annotation, quote = annotation.anchor.quote) {
   if (!quote)
@@ -2369,9 +2388,11 @@ function paintQuote(root, annotation, quote = annotation.anchor.quote) {
     starts.push(full.length);
     full += n.data;
   }
+  const blocks = blocksOf(quote);
+  if (blocks.length === 0)
+    return;
   const spans = [];
-  for (let at = full.indexOf(quote); at >= 0; at = full.indexOf(quote, at + quote.length)) {
-    const end = at + quote.length;
+  const cover = (at, end) => {
     for (let i = 0; i < nodes.length; i++) {
       const nodeStart = starts[i];
       const nodeEnd = nodeStart + nodes[i].data.length;
@@ -2383,6 +2404,13 @@ function paintQuote(root, annotation, quote = annotation.anchor.quote) {
         to: Math.min(end, nodeEnd) - nodeStart
       });
     }
+  };
+  for (let from = 0; ; ) {
+    const at = locateRun(full, blocks, from);
+    if (!at)
+      break;
+    at.forEach((start, i) => cover(start, start + blocks[i].length));
+    from = at[at.length - 1] + blocks[blocks.length - 1].length;
   }
   for (const s of spans.reverse())
     wrap(s.node, s.from, s.to, annotation);
@@ -2669,7 +2697,7 @@ function repaintReadingViews(app, provider) {
     }
   }
 }
-function readingModeHighlighter(provider) {
+function readingModeHighlighter(app, provider) {
   return (el, ctx) => {
     const annotations = provider(ctx.sourcePath);
     if (annotations.length === 0)
@@ -2680,7 +2708,17 @@ function readingModeHighlighter(provider) {
         continue;
       paintQuote(el, a, strip(a.anchor.quote));
     }
+    repaintSoon(app, provider);
   };
+}
+var pending = null;
+function repaintSoon(app, provider) {
+  if (pending !== null)
+    window.clearTimeout(pending);
+  pending = window.setTimeout(() => {
+    pending = null;
+    repaintReadingViews(app, provider);
+  }, 50);
 }
 
 // src/hosts/transcript/TranscriptHost.ts
@@ -3352,7 +3390,7 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
       setDriftListener(null);
     });
     this.registerEditorExtension(annotationDecorations(provider));
-    this.registerMarkdownPostProcessor(readingModeHighlighter(provider));
+    this.registerMarkdownPostProcessor(readingModeHighlighter(this.app, provider));
     this.registerEvent(this.app.workspace.on("layout-change", () => {
       repaintReadingViews(this.app, provider);
     }));
