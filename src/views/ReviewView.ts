@@ -13,6 +13,7 @@ import { reveal } from '../hosts/markdown/reveal';
 import { formatWhen } from '../ui/time';
 import { CommentModal } from '../ui/CommentModal';
 import { asEl } from '../dom';
+import { describeMark } from '../store/describeMark';
 import { preferredTrack, tracksFor } from '../hosts/transcript/trackFor';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
@@ -341,6 +342,8 @@ export class ReviewView extends ItemView {
       .onClick(() => { void this.markAgain(targetPath, annotation); }));
     menu.addItem(i => i.setTitle(isComment(annotation) ? 'Edit comment…' : 'Add a comment…')
       .setIcon('message-square').onClick(() => this.editComment(targetPath, annotation)));
+    menu.addItem(i => i.setTitle('Copy details').setIcon('copy')
+      .onClick(() => { void this.copyDetails(annotation, targetPath); }));
     menu.addItem(i => i.setTitle('Re-attach to selection').setIcon('link')
       .onClick(() => { void this.reattach(targetPath, annotation); }));
     menu.addItem(i => i.setTitle('Copy text').setIcon('copy')
@@ -357,6 +360,22 @@ export class ReviewView extends ItemView {
    * and only learns where it lives. Re-marking the passage by hand would give
    * you a new mark and quietly lose that history.
    */
+  /**
+   * Put the mark on the clipboard, in a shape that survives leaving here.
+   *
+   * The panel can leave the file implicit because it is right there; pasted
+   * anywhere else, a passage with no note named is an unattributed quotation.
+   */
+  private async copyDetails(annotation: Annotation, targetPath: string): Promise<void> {
+    const { text } = describeMark(annotation, {
+      targetPath,
+      when: iso => formatWhen(iso, this.plugin.settings.timeFormat),
+      clock: fmtTime,
+    });
+    await navigator.clipboard.writeText(text);
+    new Notice('Attention: mark copied.');
+  }
+
   private async reattach(targetPath: string, annotation: Annotation): Promise<void> {
     const view = this.app.workspace.getActiveViewOfType(MarkdownView);
     if (!view || view.file?.path !== targetPath || view.getMode() !== 'source') {

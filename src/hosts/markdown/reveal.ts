@@ -2,7 +2,7 @@ import { App, MarkdownView, TFile } from 'obsidian';
 import { Annotation } from '../../model';
 import { resolveMarkdown } from '../../anchor/resolveAnchor';
 import { asEl, asMedia } from '../../dom';
-import { endOfSegment, PLAY_ON } from '../transcript/segmentEnd';
+import { endOfPassage, PLAY_ON, Segment, startOfMark } from '../transcript/segmentEnd';
 
 /**
  * Go to an annotation: open its file and put the passage in front of you.
@@ -28,59 +28,84 @@ export async function reveal(app: App, file: TFile, annotation: Annotation): Pro
  * this file, nothing is found and we simply leave the file open.
  */
 async function revealInTranscript(app: App, file: TFile, annotation: Annotation): Promise<void> {
-  if (annotation.anchor.kind !== 'transcript') return;
-  const at = annotation.anchor.start;
+  const anchor = annotation.anchor;
+  if (anchor.kind !== 'transcript') return;
   await app.workspace.getLeaf(false).openFile(file);
 
-  for (let i = 0; i < 40; i++) {
-    const media = asMedia(document.querySelector('.mt-view video, .mt-view audio'));
-    if (media) {
-      const seek = () => { media.currentTime = at; };
-      if (media.readyState > 0) seek();
-      else media.addEventListener('loadedmetadata', seek, { once: true });
-      void playUntilEndOfLine(media, file.path, at);
-      void media.play();
+  const media = await waitFor(() => asMedia(document.querySelector('.mt-view video, .mt-view audio')));
+  if (!media) return;
 
-      const painted = asEl(document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`));
-      if (painted) {
-        painted.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        flash(painted);
-      }
-      return;
-    }
-    await new Promise(r => window.setTimeout(r, 50));
+  // The transcript is another plugin's to render and arrives when it arrives.
+  // Without it there is only the line's start to go on, which for a line of
+  // forty seconds is nowhere near the words that were marked.
+  const lines = (await waitFor(() => nonEmpty(segmentsOf(file.path)))) ?? [];
+  const at = seekPoint(lines, anchor.start, anchor.charStart, media.duration);
+
+  const seek = () => { media.currentTime = at; };
+  if (media.readyState > 0) seek();
+  else media.addEventListener('loadedmetadata', seek, { once: true });
+  void playUntilEndOfPassage(media, lines, anchor.start, media.duration);
+  void media.play();
+
+  const painted = asEl(document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`));
+  if (painted) {
+    painted.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    flash(painted);
   }
 }
 
 /**
- * Stop at the end of the line that was marked.
+ * Where to start playing: inside the marked line, at the marked words.
+ *
+ * The line's end is taken from where the next one begins, transcripts being
+ * written back to back; the last line ends with the recording.
+ */
+function seekPoint(
+  lines: readonly Segment[],
+  start: number,
+  charStart: number,
+  duration: number,
+): number {
+  const ordered = [...lines].sort((a, b) => a.start - b.start);
+  const i = ordered.findIndex(l => l.start > start - 0.01);
+  if (i < 0) return start;
+
+  const line = ordered[i];
+  const end = ordered[i + 1]?.start ?? duration;
+  return startOfMark(line.start, end, line.text, charStart);
+}
+
+function nonEmpty<T>(items: T[]): T[] | null {
+  return items.length > 0 ? items : null;
+}
+
+/** Poll for something another plugin is still putting on screen. */
+async function waitFor<T>(look: () => T | null, tries = 40): Promise<T | null> {
+  for (let i = 0; i < tries; i++) {
+    const found = look();
+    if (found) return found;
+    await new Promise(r => window.setTimeout(r, 50));
+  }
+  return null;
+}
+
+/**
+ * Stop at the end of the passage that was marked.
  *
  * Clicking a mark asks to hear *that*, not to start a session — so playback
- * stops where the segment does instead of running on into the rest of the
+ * stops where the passage does instead of running on into the rest of the
  * recording. Anything the listener does afterwards is theirs: pressing play
  * again, or seeking, clears the stop rather than fighting it.
- *
- * The segment's end is not stored — an anchor keeps only its start, being the
- * one thing that survives re-anchoring — so it is read back from the transcript
- * the other plugin rendered.
  */
-async function playUntilEndOfLine(
+function playUntilEndOfPassage(
   media: HTMLMediaElement,
-  mediaPath: string,
-  at: number,
-): Promise<void> {
+  lines: readonly Segment[],
+  start: number,
+  duration: number,
+): void {
   cancelStop?.();
 
-  // The transcript is another plugin's to render and may not be on screen yet;
-  // without it there are no segment boundaries to stop at, so it is worth a
-  // short wait rather than silently playing on.
-  let starts: number[] = [];
-  for (let i = 0; i < 20 && starts.length === 0; i++) {
-    starts = segmentStarts(mediaPath);
-    if (starts.length === 0) await new Promise(r => window.setTimeout(r, 50));
-  }
-
-  const until = endOfSegment(starts, at, media.duration);
+  const until = endOfPassage(lines, start, duration);
   if (until === PLAY_ON) return;
 
   const check = () => {
@@ -89,7 +114,7 @@ async function playUntilEndOfLine(
     stop();
   };
   // Seeking or hitting play again means the listener has taken over.
-  const release = () => { if (media.currentTime < at || media.currentTime > until) stop(); };
+  const release = () => { if (media.currentTime < start || media.currentTime > until) stop(); };
   const stop = () => {
     media.removeEventListener('timeupdate', check);
     media.removeEventListener('seeked', release);
@@ -105,21 +130,30 @@ async function playUntilEndOfLine(
 let cancelStop: (() => void) | null = null;
 
 /**
- * Every segment start in the transcript this mark belongs to.
+ * The transcript this mark belongs to, as lines with their text.
  *
  * Marks are filed under the track, so that is what usually matches; a player
- * showing a transcript it made itself is named by its recording instead.
+ * showing a transcript it made itself is named by its recording instead. The
+ * text comes along because where a passage ends is a question about sentences,
+ * not only about timings.
  */
-function segmentStarts(owner: string): number[] {
+function segmentsOf(owner: string): Segment[] {
   const panels = Array.from(document.querySelectorAll('.mt-transcript')).map(asEl);
   const panel =
     panels.find(p => p?.dataset.mtTrack === owner) ??
     panels.find(p => p?.dataset.mtMedia === owner) ??
     panels[0];
   if (!panel) return [];
+
   return Array.from(panel.querySelectorAll('.mt-segment'))
-    .map(el => Number(asEl(el)?.dataset.mtStart))
-    .filter(n => Number.isFinite(n));
+    .map(raw => {
+      const el = asEl(raw);
+      return {
+        start: Number(el?.dataset.mtStart),
+        text: asEl(el?.querySelector('.mt-txt'))?.textContent ?? '',
+      };
+    })
+    .filter(s => Number.isFinite(s.start));
 }
 
 async function revealInMarkdown(
