@@ -7,7 +7,7 @@ import { paintImages } from '../paintImage';
 import { transcludedNotes } from '../../store/transclusions';
 import { asEl } from '../../dom';
 import { resolveMarkdown } from '../../anchor/resolveAnchor';
-import { intersect, lineStarts, rangeOfLines } from '../../anchor/lines';
+import { Range, intersect, lineStarts, rangeOfLines } from '../../anchor/lines';
 
 /**
  * Highlights for reading mode.
@@ -65,7 +65,13 @@ export function repaintReadingViews(app: App, provider: Provider): void {
     const annotations = provider(view.file.path);
     if (annotations.length > 0) {
       paintImages(container, annotations);
-      for (const block of blocksOf(container)) paintBlock(block, source, annotations);
+      // Resolve once for the whole view, not once per block: resolving searches
+      // the note, and a long note has many blocks. Fifty blocks and ten marks
+      // was five hundred searches for one repaint, and repaints happen on
+      // every scroll.
+      const placed = place(source, annotations);
+      const starts = lineStarts(source);
+      for (const block of blocksOf(container)) paintPlaced(block, source, starts, placed);
     }
 
     // Marks belonging to notes transcluded into this one, painted inside the
@@ -95,27 +101,48 @@ function blocksOf(container: HTMLElement): HTMLElement[] {
     .filter((el): el is HTMLElement => el !== null);
 }
 
+interface Placed {
+  annotation: Annotation;
+  at: Range;
+}
+
+/** Where each mark currently sits in the source, dropping the ones that don't. */
+function place(source: string, annotations: readonly Annotation[]): Placed[] {
+  const placed: Placed[] = [];
+  for (const a of annotations) {
+    if (a.anchor.kind !== 'markdown') continue;
+    const at = resolveMarkdown(source, a.anchor);
+    if (at) placed.push({ annotation: a, at });
+  }
+  return placed;
+}
+
 /**
  * Paint the part of each mark that falls inside this block.
  *
  * The text handed to the painter is cut from the source and stripped of
  * markup, so what it looks for is what the block actually shows.
  */
-function paintBlock(el: HTMLElement, source: string, annotations: readonly Annotation[]): void {
+function paintPlaced(
+  el: HTMLElement,
+  source: string,
+  starts: readonly number[],
+  placed: readonly Placed[],
+): void {
   const lines = el.dataset[LINES]?.split(',').map(Number);
   if (!lines || lines.length !== 2 || lines.some(n => !Number.isFinite(n))) return;
 
-  const starts = lineStarts(source);
   const block = rangeOfLines(source, starts, lines[0], lines[1]);
-
-  for (const a of annotations) {
-    if (a.anchor.kind !== 'markdown') continue;
-    const at = resolveMarkdown(source, a.anchor);
-    if (!at) continue;
+  for (const { annotation, at } of placed) {
     const piece = intersect(at, block);
     if (!piece) continue;
-    paintQuote(el, a, strip(source.slice(piece.from, piece.to)));
+    paintQuote(el, annotation, strip(source.slice(piece.from, piece.to)));
   }
+}
+
+/** One block, from the post-processor, where there is nothing yet to reuse. */
+function paintBlock(el: HTMLElement, source: string, annotations: readonly Annotation[]): void {
+  paintPlaced(el, source, lineStarts(source), place(source, annotations));
 }
 
 /** `atLines` → `at-lines`, for the attribute selector. */

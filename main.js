@@ -2912,8 +2912,10 @@ function repaintReadingViews(app, provider) {
     const annotations = provider(view.file.path);
     if (annotations.length > 0) {
       paintImages(container, annotations);
+      const placed = place(source, annotations);
+      const starts = lineStarts(source);
       for (const block of blocksOf2(container))
-        paintBlock(block, source, annotations);
+        paintPlaced(block, source, starts, placed);
     }
     for (const note of transcludedNotes(app, view.file)) {
       const theirs = provider(note.path);
@@ -2936,24 +2938,32 @@ function repaintReadingViews(app, provider) {
 function blocksOf2(container) {
   return Array.from(container.querySelectorAll(`[data-${dashed(LINES)}]`)).map(asEl).filter((el) => el !== null);
 }
-function paintBlock(el, source, annotations) {
-  var _a;
-  const lines = (_a = el.dataset[LINES]) == null ? void 0 : _a.split(",").map(Number);
-  if (!lines || lines.length !== 2 || lines.some((n) => !Number.isFinite(n)))
-    return;
-  const starts = lineStarts(source);
-  const block = rangeOfLines(source, starts, lines[0], lines[1]);
+function place(source, annotations) {
+  const placed = [];
   for (const a of annotations) {
     if (a.anchor.kind !== "markdown")
       continue;
     const at = resolveMarkdown(source, a.anchor);
-    if (!at)
-      continue;
+    if (at)
+      placed.push({ annotation: a, at });
+  }
+  return placed;
+}
+function paintPlaced(el, source, starts, placed) {
+  var _a;
+  const lines = (_a = el.dataset[LINES]) == null ? void 0 : _a.split(",").map(Number);
+  if (!lines || lines.length !== 2 || lines.some((n) => !Number.isFinite(n)))
+    return;
+  const block = rangeOfLines(source, starts, lines[0], lines[1]);
+  for (const { annotation, at } of placed) {
     const piece = intersect(at, block);
     if (!piece)
       continue;
-    paintQuote(el, a, strip(source.slice(piece.from, piece.to)));
+    paintQuote(el, annotation, strip(source.slice(piece.from, piece.to)));
   }
+}
+function paintBlock(el, source, annotations) {
+  paintPlaced(el, source, lineStarts(source), place(source, annotations));
 }
 function dashed(name) {
   return name.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
