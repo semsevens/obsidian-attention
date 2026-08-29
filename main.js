@@ -1928,17 +1928,29 @@ var MarkdownHost = class {
     }, body);
   }
   /** A little of the rendered text immediately before or after an image. */
+  /**
+   * The words on either side of a picture, as rendered.
+   *
+   * Read across the whole rendered note rather than the image's own block: a
+   * picture on a line of its own becomes `<p><img></p>`, which has no text
+   * either side of it at all, and that is the ordinary shape for a clipped
+   * article. Stopping at the block meant those pictures had no context to be
+   * identified by, and marking one failed outright.
+   *
+   * A transclusion is its own root, because the context has to be looked for
+   * in the source of the note the picture actually came from.
+   */
   textAround(img, side) {
-    var _a;
-    const block = (_a = img.closest("p, li, blockquote, div")) != null ? _a : img.parentElement;
-    if (!block)
+    var _a, _b;
+    const root = (_b = (_a = img.closest(".markdown-embed-content, .markdown-preview-view, .cm-content")) != null ? _a : img.closest("p, li, blockquote, div")) != null ? _b : img.parentElement;
+    if (!root)
       return "";
-    const range = document.createRange();
+    const range = root.doc.createRange();
     if (side === "after") {
       range.setStartAfter(img);
-      range.setEnd(block, block.childNodes.length);
+      range.setEnd(root, root.childNodes.length);
     } else {
-      range.setStart(block, 0);
+      range.setStart(root, 0);
       range.setEndBefore(img);
     }
     const text = range.toString();

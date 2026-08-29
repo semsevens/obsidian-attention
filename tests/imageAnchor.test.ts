@@ -152,3 +152,47 @@ describe('embedBySurroundings', () => {
     expect(embedBySurroundings(SOURCE, embeds, '', '完全不存在的文字', p.at, p.text)).toBeNull();
   });
 });
+
+// The case that failed in the wild: a clipped article whose pictures each sit
+// alone on a line. Both are remote URLs the renderer has rewritten, so nothing
+// matches by target and the surroundings are all there is to go on — and the
+// caller has to read them from the whole note, because the picture's own block
+// holds nothing but the picture.
+describe('a picture alone on its line', () => {
+  const source = [
+    '---',
+    'title: "x"',
+    '---',
+    '',
+    '![banner](https://cdn.example.com/one/0?wx_fmt=jpeg)',
+    '',
+    '以下是碎碎念：',
+    '',
+    'some paragraphs',
+    '',
+    '![图片](https://cdn.example.com/two/0?wx_fmt=jpeg)',
+    '',
+  ].join('\n');
+  const embeds = findImageEmbeds(source);
+  const plain = project(source);
+  const at = (i: number) => plain.map[i] ?? 0;
+
+  it('finds both embeds', () => {
+    expect(embeds).toHaveLength(2);
+  });
+
+  it('picks the first one from the text that follows it', () => {
+    const hit = embedBySurroundings(source, embeds, '', '以下是碎碎念：', at, plain.text);
+    expect(hit).toBe(embeds[0]);
+  });
+
+  it('picks the last one from the text that precedes it', () => {
+    const hit = embedBySurroundings(source, embeds, 'some paragraphs', '', at, plain.text);
+    expect(hit).toBe(embeds[1]);
+  });
+
+  // What the old textAround handed it, and why marking failed.
+  it('gives up when handed no context at all', () => {
+    expect(embedBySurroundings(source, embeds, '', '', at, plain.text)).toBeNull();
+  });
+});
