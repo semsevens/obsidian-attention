@@ -78,6 +78,52 @@ var AttentionSettingTab = class extends import_obsidian2.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+    /** Redrawn on its own, so flipping the switch doesn't rebuild the whole tab. */
+    this.viewModeRules = null;
+  }
+  renderViewModeRules() {
+    const root = this.viewModeRules;
+    if (!root)
+      return;
+    root.empty();
+    if (!this.plugin.settings.forceViewMode)
+      return;
+    new import_obsidian2.Setting(root).setName("Everything else opens as").setDesc("Used for any note no exception below covers.").addDropdown(
+      (d) => d.addOptions(MODE_LABELS).setValue(this.plugin.settings.defaultViewMode).onChange(async (v) => {
+        this.plugin.settings.defaultViewMode = v;
+        await this.plugin.saveSettings();
+        this.plugin.applyViewModes();
+      })
+    );
+    new import_obsidian2.Setting(root).setName("Exceptions by folder").setDesc(
+      "Folders that open differently \u2014 somewhere you write rather than read. The deepest matching folder wins. A note can always overrule both with obsidianUIMode: preview (or source) in its frontmatter."
+    ).addButton(
+      (b) => b.setButtonText("Add folder").setCta().onClick(async () => {
+        this.plugin.settings.folderViewModes.push({ folder: "", mode: "live" });
+        await this.plugin.saveSettings();
+        this.renderViewModeRules();
+      })
+    );
+    this.plugin.settings.folderViewModes.forEach((rule, i) => {
+      new import_obsidian2.Setting(root).setClass("at-folder-rule").addText(
+        (t) => t.setPlaceholder("Folder/path").setValue(rule.folder).onChange(async (v) => {
+          rule.folder = v;
+          await this.plugin.saveSettings();
+        })
+      ).addDropdown(
+        (d) => d.addOptions(MODE_LABELS).setValue(rule.mode).onChange(async (v) => {
+          rule.mode = v;
+          await this.plugin.saveSettings();
+          this.plugin.applyViewModes();
+        })
+      ).addExtraButton(
+        (b) => b.setIcon("trash-2").setTooltip("Remove").onClick(async () => {
+          this.plugin.settings.folderViewModes.splice(i, 1);
+          await this.plugin.saveSettings();
+          this.renderViewModeRules();
+        })
+      );
+    });
   }
   display() {
     const { containerEl } = this;
@@ -146,47 +192,11 @@ var AttentionSettingTab = class extends import_obsidian2.PluginSettingTab {
         this.plugin.settings.forceViewMode = v;
         await this.plugin.saveSettings();
         this.plugin.applyViewModes();
-        this.display();
+        this.renderViewModeRules();
       })
     );
-    if (this.plugin.settings.forceViewMode) {
-      new import_obsidian2.Setting(containerEl).setName("Everything else opens as").setDesc("Used for any note no exception below covers.").addDropdown(
-        (d) => d.addOptions(MODE_LABELS).setValue(this.plugin.settings.defaultViewMode).onChange(async (v) => {
-          this.plugin.settings.defaultViewMode = v;
-          await this.plugin.saveSettings();
-          this.plugin.applyViewModes();
-        })
-      );
-      new import_obsidian2.Setting(containerEl).setName("Exceptions by folder").setDesc(
-        "Folders that open differently \u2014 somewhere you write rather than read. The deepest matching folder wins. A note can always overrule both with obsidianUIMode: preview (or source) in its frontmatter."
-      ).addButton(
-        (b) => b.setButtonText("Add folder").setCta().onClick(async () => {
-          this.plugin.settings.folderViewModes.push({ folder: "", mode: "live" });
-          await this.plugin.saveSettings();
-          this.display();
-        })
-      );
-      this.plugin.settings.folderViewModes.forEach((rule, i) => {
-        new import_obsidian2.Setting(containerEl).setClass("at-folder-rule").addText(
-          (t) => t.setPlaceholder("folder/path").setValue(rule.folder).onChange(async (v) => {
-            rule.folder = v;
-            await this.plugin.saveSettings();
-          })
-        ).addDropdown(
-          (d) => d.addOptions(MODE_LABELS).setValue(rule.mode).onChange(async (v) => {
-            rule.mode = v;
-            await this.plugin.saveSettings();
-            this.plugin.applyViewModes();
-          })
-        ).addExtraButton(
-          (b) => b.setIcon("trash-2").setTooltip("Remove").onClick(async () => {
-            this.plugin.settings.folderViewModes.splice(i, 1);
-            await this.plugin.saveSettings();
-            this.display();
-          })
-        );
-      });
-    }
+    this.viewModeRules = containerEl.createDiv();
+    this.renderViewModeRules();
     new import_obsidian2.Setting(containerEl).setName("Review").setHeading();
     new import_obsidian2.Setting(containerEl).setName("Open the panel for annotated notes").setDesc(
       "Reveal the Attention panel when you open a note that has annotations, and leave it alone otherwise. Focus stays in the note either way."

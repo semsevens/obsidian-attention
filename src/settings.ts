@@ -91,6 +91,76 @@ export class AttentionSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
+  /** Redrawn on its own, so flipping the switch doesn't rebuild the whole tab. */
+  private viewModeRules: HTMLElement | null = null;
+
+  private renderViewModeRules(): void {
+    const root = this.viewModeRules;
+    if (!root) return;
+    root.empty();
+    if (!this.plugin.settings.forceViewMode) return;
+
+    new Setting(root)
+      .setName('Everything else opens as')
+      .setDesc('Used for any note no exception below covers.')
+      .addDropdown(d =>
+        d
+          .addOptions(MODE_LABELS)
+          .setValue(this.plugin.settings.defaultViewMode)
+          .onChange(async v => {
+            this.plugin.settings.defaultViewMode = v as ViewModePreference;
+            await this.plugin.saveSettings();
+            this.plugin.applyViewModes();
+          }),
+      );
+
+    new Setting(root)
+      .setName('Exceptions by folder')
+      .setDesc(
+        'Folders that open differently — somewhere you write rather than read. ' +
+          'The deepest matching folder wins. A note can always overrule both with ' +
+          'obsidianUIMode: preview (or source) in its frontmatter.',
+      )
+      .addButton(b =>
+        b.setButtonText('Add folder').setCta().onClick(async () => {
+          this.plugin.settings.folderViewModes.push({ folder: '', mode: 'live' });
+          await this.plugin.saveSettings();
+          this.renderViewModeRules();
+        }),
+      );
+
+    this.plugin.settings.folderViewModes.forEach((rule, i) => {
+      new Setting(root)
+        .setClass('at-folder-rule')
+        .addText(t =>
+          t
+            .setPlaceholder('Folder/path')
+            .setValue(rule.folder)
+            .onChange(async v => {
+              rule.folder = v;
+              await this.plugin.saveSettings();
+            }),
+        )
+        .addDropdown(d =>
+          d
+            .addOptions(MODE_LABELS)
+            .setValue(rule.mode)
+            .onChange(async v => {
+              rule.mode = v as ViewModePreference;
+              await this.plugin.saveSettings();
+              this.plugin.applyViewModes();
+            }),
+        )
+        .addExtraButton(b =>
+          b.setIcon('trash-2').setTooltip('Remove').onClick(async () => {
+            this.plugin.settings.folderViewModes.splice(i, 1);
+            await this.plugin.saveSettings();
+            this.renderViewModeRules();
+          }),
+        );
+    });
+  }
+
   display(): void {
     const { containerEl } = this;
     containerEl.empty();
@@ -206,71 +276,15 @@ export class AttentionSettingTab extends PluginSettingTab {
           this.plugin.settings.forceViewMode = v;
           await this.plugin.saveSettings();
           this.plugin.applyViewModes();
-          this.display();
+          this.renderViewModeRules();
         }),
       );
 
-    if (this.plugin.settings.forceViewMode) {
-      new Setting(containerEl)
-        .setName('Everything else opens as')
-        .setDesc('Used for any note no exception below covers.')
-        .addDropdown(d =>
-          d
-            .addOptions(MODE_LABELS)
-            .setValue(this.plugin.settings.defaultViewMode)
-            .onChange(async v => {
-              this.plugin.settings.defaultViewMode = v as ViewModePreference;
-              await this.plugin.saveSettings();
-              this.plugin.applyViewModes();
-            }),
-        );
-
-      new Setting(containerEl)
-        .setName('Exceptions by folder')
-        .setDesc(
-          'Folders that open differently — somewhere you write rather than read. ' +
-            'The deepest matching folder wins. A note can always overrule both with ' +
-            'obsidianUIMode: preview (or source) in its frontmatter.',
-        )
-        .addButton(b =>
-          b.setButtonText('Add folder').setCta().onClick(async () => {
-            this.plugin.settings.folderViewModes.push({ folder: '', mode: 'live' });
-            await this.plugin.saveSettings();
-            this.display();
-          }),
-        );
-
-      this.plugin.settings.folderViewModes.forEach((rule, i) => {
-        new Setting(containerEl)
-          .setClass('at-folder-rule')
-          .addText(t =>
-            t
-              .setPlaceholder('folder/path')
-              .setValue(rule.folder)
-              .onChange(async v => {
-                rule.folder = v;
-                await this.plugin.saveSettings();
-              }),
-          )
-          .addDropdown(d =>
-            d
-              .addOptions(MODE_LABELS)
-              .setValue(rule.mode)
-              .onChange(async v => {
-                rule.mode = v as ViewModePreference;
-                await this.plugin.saveSettings();
-                this.plugin.applyViewModes();
-              }),
-          )
-          .addExtraButton(b =>
-            b.setIcon('trash-2').setTooltip('Remove').onClick(async () => {
-              this.plugin.settings.folderViewModes.splice(i, 1);
-              await this.plugin.saveSettings();
-              this.display();
-            }),
-          );
-      });
-    }
+    // Only this part changes when the switch is flipped or a folder is added,
+    // so only this part is redrawn — rebuilding the whole tab would scroll the
+    // reader back to the top of it for no reason.
+    this.viewModeRules = containerEl.createDiv();
+    this.renderViewModeRules();
 
     new Setting(containerEl).setName('Review').setHeading();
 
