@@ -1517,6 +1517,38 @@ function belongsTo(view, el) {
   return view !== null && el !== null && view.contains(el);
 }
 
+// src/anchor/snapRange.ts
+function bodyStart(source) {
+  if (!source.startsWith("---"))
+    return 0;
+  const close = source.indexOf("\n---", 3);
+  if (close < 0)
+    return 0;
+  let at = close + 4;
+  while (at < source.length && /\s/.test(source[at]))
+    at++;
+  return at;
+}
+function snapRange(source, from, to) {
+  let start = Math.max(0, Math.min(from, to));
+  let end = Math.min(source.length, Math.max(from, to));
+  const body = bodyStart(source);
+  if (end <= body)
+    return null;
+  start = Math.max(start, body);
+  for (const embed of findImageEmbeds(source)) {
+    if (start > embed.from && start < embed.to)
+      start = embed.from;
+    if (end > embed.from && end < embed.to)
+      end = embed.to;
+  }
+  while (start < end && /\s/.test(source[start]))
+    start++;
+  while (end > start && /\s/.test(source[end - 1]))
+    end--;
+  return end > start ? { from: start, to: end } : null;
+}
+
 // src/hosts/markdown/MarkdownHost.ts
 var MarkdownHost = class {
   constructor(app, plugin, store, settings) {
@@ -1727,7 +1759,20 @@ var MarkdownHost = class {
     const to = editor.posToOffset(editor.getCursor("to"));
     if (from === to)
       return null;
-    return { kind: "markdown", ...describe(editor.getValue(), from, to) };
+    return this.anchorFor(editor.getValue(), from, to);
+  }
+  /**
+   * Turn a pair of source offsets into an anchor, edges tidied first.
+   *
+   * Live Preview hides the shape of the source: the frontmatter is a table and
+   * a picture is a picture, so a drag can end up starting inside a `---` fence
+   * and stopping halfway along an image URL without ever looking like it did.
+   */
+  anchorFor(source, from, to) {
+    const range = snapRange(source, from, to);
+    if (!range)
+      return null;
+    return { kind: "markdown", ...describe(source, range.from, range.to) };
   }
   /** Selection finished: offer the swatches straight away, if asked to. */
   async onSelectionMade() {
@@ -1806,7 +1851,7 @@ var MarkdownHost = class {
     const range = toSource(plain, at, at + selected.length);
     if (!range)
       return null;
-    return { kind: "markdown", ...describe(source, range.from, range.to) };
+    return this.anchorFor(source, range.from, range.to);
   }
   /**
    * How many identical strings precede this selection on screen.

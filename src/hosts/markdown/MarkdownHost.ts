@@ -12,6 +12,7 @@ import { CommentModal } from '../../ui/CommentModal';
 import { AttentionSettings } from '../../settings';
 import { asEl, asImg, elementOf } from '../../dom';
 import { belongsTo, ownerOf } from './ownerView';
+import { snapRange } from '../../anchor/snapRange';
 
 /**
  * Turns a selection in a markdown note into an annotation, via the right-click
@@ -250,7 +251,20 @@ export class MarkdownHost {
     const from = editor.posToOffset(editor.getCursor('from'));
     const to = editor.posToOffset(editor.getCursor('to'));
     if (from === to) return null;
-    return { kind: 'markdown', ...describe(editor.getValue(), from, to) };
+    return this.anchorFor(editor.getValue(), from, to);
+  }
+
+  /**
+   * Turn a pair of source offsets into an anchor, edges tidied first.
+   *
+   * Live Preview hides the shape of the source: the frontmatter is a table and
+   * a picture is a picture, so a drag can end up starting inside a `---` fence
+   * and stopping halfway along an image URL without ever looking like it did.
+   */
+  private anchorFor(source: string, from: number, to: number): MarkdownAnchor | null {
+    const range = snapRange(source, from, to);
+    if (!range) return null;
+    return { kind: 'markdown', ...describe(source, range.from, range.to) };
   }
 
   /** Selection finished: offer the swatches straight away, if asked to. */
@@ -339,7 +353,7 @@ export class MarkdownHost {
     }
     const range = toSource(plain, at, at + selected.length);
     if (!range) return null;
-    return { kind: 'markdown', ...describe(source, range.from, range.to) };
+    return this.anchorFor(source, range.from, range.to);
   }
 
   /**
