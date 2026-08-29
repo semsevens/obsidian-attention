@@ -785,6 +785,16 @@ function narrow(value, type) {
   return node.instanceOf(type) ? node : null;
 }
 
+// src/hosts/transcript/segmentEnd.ts
+var PLAY_ON = Infinity;
+var SAME_MOMENT = 0.01;
+function endOfSegment(starts, start, duration) {
+  const next = starts.filter((s) => Number.isFinite(s) && s > start + SAME_MOMENT).sort((a, b) => a - b)[0];
+  if (next !== void 0)
+    return next;
+  return Number.isFinite(duration) && duration > start ? duration : PLAY_ON;
+}
+
 // src/hosts/markdown/reveal.ts
 async function reveal(app, file, annotation) {
   if (annotation.anchor.kind === "transcript") {
@@ -808,6 +818,7 @@ async function revealInTranscript(app, file, annotation) {
         seek();
       else
         media.addEventListener("loadedmetadata", seek, { once: true });
+      void playUntilEndOfLine(media, file.path, at);
       void media.play();
       const painted = asEl(document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`));
       if (painted) {
@@ -818,6 +829,48 @@ async function revealInTranscript(app, file, annotation) {
     }
     await new Promise((r) => window.setTimeout(r, 50));
   }
+}
+async function playUntilEndOfLine(media, mediaPath, at) {
+  cancelStop == null ? void 0 : cancelStop();
+  let starts = [];
+  for (let i = 0; i < 20 && starts.length === 0; i++) {
+    starts = segmentStarts(mediaPath);
+    if (starts.length === 0)
+      await new Promise((r) => window.setTimeout(r, 50));
+  }
+  const until = endOfSegment(starts, at, media.duration);
+  if (until === PLAY_ON)
+    return;
+  const check = () => {
+    if (media.currentTime < until)
+      return;
+    media.pause();
+    stop();
+  };
+  const release = () => {
+    if (media.currentTime < at || media.currentTime > until)
+      stop();
+  };
+  const stop = () => {
+    media.removeEventListener("timeupdate", check);
+    media.removeEventListener("seeked", release);
+    cancelStop = null;
+  };
+  media.addEventListener("timeupdate", check);
+  media.addEventListener("seeked", release);
+  cancelStop = stop;
+}
+var cancelStop = null;
+function segmentStarts(mediaPath) {
+  var _a;
+  const panels = Array.from(document.querySelectorAll(".mt-transcript"));
+  const panel = (_a = panels.map(asEl).find((p) => (p == null ? void 0 : p.dataset.mtMedia) === mediaPath)) != null ? _a : asEl(panels[0]);
+  if (!panel)
+    return [];
+  return Array.from(panel.querySelectorAll(".mt-segment")).map((el) => {
+    var _a2;
+    return Number((_a2 = asEl(el)) == null ? void 0 : _a2.dataset.mtStart);
+  }).filter((n) => Number.isFinite(n));
 }
 async function revealInMarkdown(app, file, annotation) {
   const leaf = app.workspace.getLeaf(false);
