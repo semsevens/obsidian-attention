@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => AttentionPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian13 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian2 = require("obsidian");
@@ -1243,6 +1243,53 @@ function fmtTime(seconds) {
 }
 
 // src/store/annotationStore.ts
+var import_obsidian8 = require("obsidian");
+
+// src/anchor/snapRange.ts
+function bodyStart(source) {
+  if (!source.startsWith("---"))
+    return 0;
+  const close = source.indexOf("\n---", 3);
+  if (close < 0)
+    return 0;
+  let at = close + 4;
+  while (at < source.length && /\s/.test(source[at]))
+    at++;
+  return at;
+}
+function snapRange(source, from, to) {
+  let start = Math.max(0, Math.min(from, to));
+  let end = Math.min(source.length, Math.max(from, to));
+  const body = bodyStart(source);
+  if (end <= body)
+    return null;
+  start = Math.max(start, body);
+  for (const embed of findImageEmbeds(source)) {
+    if (start > embed.from && start < embed.to)
+      start = embed.from;
+    if (end > embed.from && end < embed.to)
+      end = embed.to;
+  }
+  while (start < end && /\s/.test(source[start]))
+    start++;
+  while (end > start && /\s/.test(source[end - 1]))
+    end--;
+  return end > start ? { from: start, to: end } : null;
+}
+
+// src/anchor/repairAnchors.ts
+function repairAnchor(source, anchor) {
+  if (source.slice(anchor.from, anchor.to) !== anchor.quote)
+    return null;
+  const snapped = snapRange(source, anchor.from, anchor.to);
+  if (!snapped)
+    return null;
+  if (snapped.from === anchor.from && snapped.to === anchor.to)
+    return null;
+  return { ...anchor, ...describe(source, snapped.from, snapped.to) };
+}
+
+// src/store/annotationStore.ts
 var AnnotationStore = class {
   constructor(app, index) {
     this.app = app;
@@ -1257,9 +1304,12 @@ var AnnotationStore = class {
     const cached = this.cache.get(targetPath);
     if (cached)
       return cached;
-    const loaded = await loadSidecar(this.app, targetPath);
-    this.cache.set(targetPath, loaded);
-    return loaded;
+    const loaded = await repairOnLoad(this.app, await loadSidecar(this.app, targetPath));
+    this.cache.set(targetPath, loaded.data);
+    this.index.replaceFile(targetPath, loaded.data.annotations);
+    if (loaded.changed)
+      await saveSidecar(this.app, loaded.data);
+    return loaded.data;
   }
   /**
    * Synchronous read for render paths that can't await.
@@ -1380,9 +1430,31 @@ ${body}` : body;
       l(targetPath);
   }
 };
+async function repairOnLoad(app, data) {
+  const file = app.vault.getAbstractFileByPath(data.target);
+  if (!(file instanceof import_obsidian8.TFile) || data.annotations.length === 0)
+    return { data, changed: false };
+  let source;
+  try {
+    source = await app.vault.cachedRead(file);
+  } catch (e) {
+    return { data, changed: false };
+  }
+  let changed = false;
+  const annotations = data.annotations.map((a) => {
+    if (a.anchor.kind !== "markdown")
+      return a;
+    const repaired = repairAnchor(source, a.anchor);
+    if (!repaired)
+      return a;
+    changed = true;
+    return { ...a, anchor: repaired };
+  });
+  return changed ? { data: { ...data, annotations }, changed } : { data, changed: false };
+}
 
 // src/hosts/markdown/MarkdownHost.ts
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/ui/SelectionPopover.ts
 var SelectionPopover = class {
@@ -1517,38 +1589,6 @@ function belongsTo(view, el) {
   return view !== null && el !== null && view.contains(el);
 }
 
-// src/anchor/snapRange.ts
-function bodyStart(source) {
-  if (!source.startsWith("---"))
-    return 0;
-  const close = source.indexOf("\n---", 3);
-  if (close < 0)
-    return 0;
-  let at = close + 4;
-  while (at < source.length && /\s/.test(source[at]))
-    at++;
-  return at;
-}
-function snapRange(source, from, to) {
-  let start = Math.max(0, Math.min(from, to));
-  let end = Math.min(source.length, Math.max(from, to));
-  const body = bodyStart(source);
-  if (end <= body)
-    return null;
-  start = Math.max(start, body);
-  for (const embed of findImageEmbeds(source)) {
-    if (start > embed.from && start < embed.to)
-      start = embed.from;
-    if (end > embed.from && end < embed.to)
-      end = embed.to;
-  }
-  while (start < end && /\s/.test(source[start]))
-    start++;
-  while (end > start && /\s/.test(source[end - 1]))
-    end--;
-  return end > start ? { from: start, to: end } : null;
-}
-
 // src/hosts/markdown/MarkdownHost.ts
 var MarkdownHost = class {
   constructor(app, plugin, store, settings) {
@@ -1617,7 +1657,7 @@ var MarkdownHost = class {
     });
     this.plugin.registerDomEvent(document, "contextmenu", (e) => {
       var _a;
-      const view = (_a = this.viewContaining(this.lastTarget)) != null ? _a : this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+      const view = (_a = this.viewContaining(this.lastTarget)) != null ? _a : this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
       if (!(view == null ? void 0 : view.file) || view.getMode() !== "preview")
         return;
       if (!this.hasSomethingToOffer(view))
@@ -1726,7 +1766,7 @@ var MarkdownHost = class {
   /** The markdown view whose content contains `el`. */
   viewContaining(el) {
     var _a, _b;
-    const views = this.app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((v) => v instanceof import_obsidian8.MarkdownView);
+    const views = this.app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((v) => v instanceof import_obsidian9.MarkdownView);
     return (_b = (_a = ownerOf(views.map((v) => ({ v, contains: (n) => v.contentEl.contains(n) })), el)) == null ? void 0 : _a.v) != null ? _b : null;
   }
   /** The element the selection starts in. */
@@ -1819,7 +1859,7 @@ var MarkdownHost = class {
     const file = view.file;
     if (!file)
       return;
-    const menu = new import_obsidian8.Menu();
+    const menu = new import_obsidian9.Menu();
     const existing = asEl((_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl"));
     const img = asImg((_b = this.lastTarget) == null ? void 0 : _b.closest("img"));
     if (existing) {
@@ -1845,7 +1885,7 @@ var MarkdownHost = class {
     const plain = project(source);
     const at = nthOccurrence(plain.text, selected, this.renderedOrdinal(selection, selected));
     if (at < 0) {
-      new import_obsidian8.Notice("Attention: could not find that selection in the note.");
+      new import_obsidian9.Notice("Attention: could not find that selection in the note.");
       return null;
     }
     const range = toSource(plain, at, at + selected.length);
@@ -1938,7 +1978,7 @@ var MarkdownHost = class {
     const source = await this.app.vault.cachedRead(file);
     const embeds = findImageEmbeds(source);
     if (embeds.length === 0) {
-      new import_obsidian8.Notice("Attention: could not find that image in the note.");
+      new import_obsidian9.Notice("Attention: could not find that image in the note.");
       return;
     }
     const src = (_a = img.getAttribute("src")) != null ? _a : "";
@@ -1963,7 +2003,7 @@ var MarkdownHost = class {
       );
     }
     if (!embed) {
-      new import_obsidian8.Notice("Attention: could not tell which image in the note that is.");
+      new import_obsidian9.Notice("Attention: could not tell which image in the note that is.");
       return;
     }
     await this.mark(file, {
@@ -2009,7 +2049,7 @@ var MarkdownHost = class {
   async markAgain(targetPath, id) {
     const updated = await this.store.markAgain(targetPath, id);
     if (updated)
-      new import_obsidian8.Notice(`Marked ${updated.hits.length}\xD7 now`);
+      new import_obsidian9.Notice(`Marked ${updated.hits.length}\xD7 now`);
   }
   async editComment(file, id) {
     var _a;
@@ -2024,14 +2064,14 @@ var MarkdownHost = class {
   async mark(file, anchor, body) {
     const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
     if (repeat)
-      new import_obsidian8.Notice(`Marked ${annotation.hits.length}\xD7 now`);
+      new import_obsidian9.Notice(`Marked ${annotation.hits.length}\xD7 now`);
   }
 };
 
 // src/hosts/markdown/decorations.ts
 var import_view = require("@codemirror/view");
 var import_state = require("@codemirror/state");
-var import_obsidian9 = require("obsidian");
+var import_obsidian10 = require("obsidian");
 
 // src/hosts/paintQuote.ts
 function paintQuote(root, annotation, quote = annotation.anchor.quote) {
@@ -2136,7 +2176,7 @@ function setDriftListener(listener) {
 }
 function build(view, provider) {
   var _a, _b;
-  const path = (_b = (_a = view.state.field(import_obsidian9.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+  const path = (_b = (_a = view.state.field(import_obsidian10.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
   if (!path)
     return import_view.Decoration.none;
   const annotations = provider(path);
@@ -2185,7 +2225,7 @@ function reportEdit(u) {
   var _a, _b;
   if (!onEdit)
     return;
-  const path = (_b = (_a = u.state.field(import_obsidian9.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+  const path = (_b = (_a = u.state.field(import_obsidian10.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
   if (!path)
     return;
   const changes = [];
@@ -2198,7 +2238,7 @@ function reportEdit(u) {
 function repaintEditors(app, provider) {
   app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
     const view = leaf.view;
-    if (!(view instanceof import_obsidian9.MarkdownView))
+    if (!(view instanceof import_obsidian10.MarkdownView))
       return;
     const cm = view.editor.cm;
     cm == null ? void 0 : cm.dispatch({ effects: refreshAnnotations.of() });
@@ -2311,11 +2351,11 @@ var AnchorTracker = class {
 };
 
 // src/hosts/markdown/readingMode.ts
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 function repaintReadingViews(app, provider) {
   for (const leaf of app.workspace.getLeavesOfType("markdown")) {
     const view = leaf.view;
-    if (!(view instanceof import_obsidian10.MarkdownView) || !view.file)
+    if (!(view instanceof import_obsidian11.MarkdownView) || !view.file)
       continue;
     const container = asEl(view.contentEl.querySelector(".markdown-preview-view"));
     if (!container)
@@ -2360,7 +2400,7 @@ function readingModeHighlighter(provider) {
 }
 
 // src/hosts/transcript/TranscriptHost.ts
-var import_obsidian11 = require("obsidian");
+var import_obsidian12 = require("obsidian");
 
 // src/anchor/transcriptAnchor.ts
 var TIME_TOLERANCE_S = 3;
@@ -2587,7 +2627,7 @@ var TranscriptHost = class {
     const text = txt.innerText;
     const at = text.indexOf(selected);
     if (at < 0) {
-      new import_obsidian11.Notice("Attention: select within a single transcript line.");
+      new import_obsidian12.Notice("Attention: select within a single transcript line.");
       return null;
     }
     const seg = {
@@ -2620,7 +2660,7 @@ var TranscriptHost = class {
   }
   async showMenu(e, hit) {
     var _a;
-    const menu = new import_obsidian11.Menu();
+    const menu = new import_obsidian12.Menu();
     if (hit) {
       const mediaPath = (_a = this.panelOf(hit)) == null ? void 0 : _a.mediaPath;
       const id = hit.dataset.atId;
@@ -2673,7 +2713,7 @@ var TranscriptHost = class {
   async markAgain(targetPath, id) {
     const updated = await this.store.markAgain(targetPath, id);
     if (updated)
-      new import_obsidian11.Notice(`Marked ${updated.hits.length}\xD7 now`);
+      new import_obsidian12.Notice(`Marked ${updated.hits.length}\xD7 now`);
   }
   async editComment(mediaPath, id) {
     var _a;
@@ -2688,12 +2728,12 @@ var TranscriptHost = class {
   async mark(mediaPath, anchor, body) {
     const { repeat, annotation } = await this.store.mark(mediaPath, anchor, body);
     if (repeat)
-      new import_obsidian11.Notice(`Marked ${annotation.hits.length}\xD7 now`);
+      new import_obsidian12.Notice(`Marked ${annotation.hits.length}\xD7 now`);
   }
 };
 
 // src/hosts/markdown/viewModeHost.ts
-var import_obsidian12 = require("obsidian");
+var import_obsidian13 = require("obsidian");
 
 // src/viewMode.ts
 var UI_MODE_KEY = "obsidianUIMode";
@@ -2777,7 +2817,7 @@ var ViewModeHost = class {
   applyToOpenNotes() {
     this.applied = /* @__PURE__ */ new WeakMap();
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
-      const file = leaf.view instanceof import_obsidian12.MarkdownView ? leaf.view.file : null;
+      const file = leaf.view instanceof import_obsidian13.MarkdownView ? leaf.view.file : null;
       if (file)
         this.apply(file, leaf);
     }
@@ -2817,7 +2857,7 @@ var ViewModeHost = class {
   leavesShowing(file) {
     return this.app.workspace.getLeavesOfType("markdown").filter((leaf) => {
       var _a;
-      return leaf.view instanceof import_obsidian12.MarkdownView && ((_a = leaf.view.file) == null ? void 0 : _a.path) === file.path;
+      return leaf.view instanceof import_obsidian13.MarkdownView && ((_a = leaf.view.file) == null ? void 0 : _a.path) === file.path;
     });
   }
   matches(leaf, target) {
@@ -2837,7 +2877,7 @@ var ViewModeHost = class {
 };
 
 // src/main.ts
-var AttentionPlugin = class extends import_obsidian13.Plugin {
+var AttentionPlugin = class extends import_obsidian14.Plugin {
   constructor() {
     super(...arguments);
     this.markdownHost = null;
@@ -2922,8 +2962,8 @@ var AttentionPlugin = class extends import_obsidian13.Plugin {
       return false;
     const targetPath = targetPathFor(file.path);
     const target = targetPath && this.app.vault.getAbstractFileByPath(targetPath);
-    if (!(target instanceof import_obsidian13.TFile)) {
-      new import_obsidian13.Notice(
+    if (!(target instanceof import_obsidian14.TFile)) {
+      new import_obsidian14.Notice(
         `Attention: \u201C${targetPath != null ? targetPath : file.name}\u201D no longer exists. Its marks are still here \u2014 delete this file to discard them.`
       );
       return false;
@@ -2961,7 +3001,7 @@ var AttentionPlugin = class extends import_obsidian13.Plugin {
   async warmOpenFiles() {
     const paths = /* @__PURE__ */ new Set();
     this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
-      const file = leaf.view instanceof import_obsidian13.MarkdownView ? leaf.view.file : null;
+      const file = leaf.view instanceof import_obsidian14.MarkdownView ? leaf.view.file : null;
       if (file)
         paths.add(file.path);
     });
@@ -3004,7 +3044,7 @@ var AttentionPlugin = class extends import_obsidian13.Plugin {
   rerenderReadingViews() {
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (view instanceof import_obsidian13.MarkdownView && view.getMode() === "preview") {
+      if (view instanceof import_obsidian14.MarkdownView && view.getMode() === "preview") {
         view.previewMode.rerender(true);
       }
     }
@@ -3044,7 +3084,7 @@ var AttentionPlugin = class extends import_obsidian13.Plugin {
     await leaf.loadIfDeferred();
     await this.app.workspace.revealLeaf(leaf);
     if (!focus) {
-      const editor = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
+      const editor = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
       if (editor)
         this.app.workspace.setActiveLeaf(editor.leaf, { focus: true });
     }
@@ -3064,10 +3104,10 @@ var AttentionPlugin = class extends import_obsidian13.Plugin {
    * is a sibling, so it travels with the folder — only a file's own rename does.
    */
   async handleRename(file, oldPath) {
-    if (!(file instanceof import_obsidian13.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian14.TFile) || isSidecarPath(file.path))
       return;
     const old = this.app.vault.getAbstractFileByPath(sidecarPathFor(oldPath));
-    if (!(old instanceof import_obsidian13.TFile))
+    if (!(old instanceof import_obsidian14.TFile))
       return;
     const nextPath = sidecarPathFor(file.path);
     if (old.path === nextPath)
@@ -3080,17 +3120,17 @@ var AttentionPlugin = class extends import_obsidian13.Plugin {
       this.index.renameFile(oldPath, file.path);
       this.refreshReviewViews();
     } catch (e) {
-      new import_obsidian13.Notice(`Attention: could not move annotations for ${file.name}`);
+      new import_obsidian14.Notice(`Attention: could not move annotations for ${file.name}`);
       console.error(e);
     }
   }
   async handleDelete(file) {
-    if (!(file instanceof import_obsidian13.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian14.TFile) || isSidecarPath(file.path))
       return;
     if (this.settings.keepOrphanedSidecars)
       return;
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
-    if (sidecar instanceof import_obsidian13.TFile)
+    if (sidecar instanceof import_obsidian14.TFile)
       await this.app.fileManager.trashFile(sidecar);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);

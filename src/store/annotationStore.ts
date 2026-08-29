@@ -1,7 +1,8 @@
-import { App } from 'obsidian';
+import { App, TFile } from 'obsidian';
 import { Annotation, AnnotationFile, Anchor, newId, sameSpot } from '../model';
 import { loadSidecar, saveSidecar } from './sidecar';
 import { AttentionIndex } from './attentionIndex';
+import { repairAnchor } from '../anchor/repairAnchors';
 
 type Listener = (targetPath: string) => void;
 
@@ -28,9 +29,14 @@ export class AnnotationStore {
   async get(targetPath: string): Promise<AnnotationFile> {
     const cached = this.cache.get(targetPath);
     if (cached) return cached;
-    const loaded = await loadSidecar(this.app, targetPath);
-    this.cache.set(targetPath, loaded);
-    return loaded;
+    const loaded = await repairOnLoad(this.app, await loadSidecar(this.app, targetPath));
+    this.cache.set(targetPath, loaded.data);
+    this.index.replaceFile(targetPath, loaded.data.annotations);
+    // Persisted straight away rather than waiting for the next edit: a repair
+    // that only lives in memory has to be redone on every load, and the file
+    // on disk keeps showing the broken quote to anything else that reads it.
+    if (loaded.changed) await saveSidecar(this.app, loaded.data);
+    return loaded.data;
   }
 
   /**
@@ -166,4 +172,36 @@ export class AnnotationStore {
   private emit(targetPath: string): void {
     for (const l of this.listeners) l(targetPath);
   }
+}
+
+/**
+ * Read a sidecar's anchors through `repairAnchor` before anyone sees them.
+ *
+ * Silent when the annotated file cannot be read: no source means no way to
+ * judge an anchor, and leaving it alone is the answer that loses nothing.
+ */
+async function repairOnLoad(
+  app: App,
+  data: AnnotationFile,
+): Promise<{ data: AnnotationFile; changed: boolean }> {
+  const file = app.vault.getAbstractFileByPath(data.target);
+  if (!(file instanceof TFile) || data.annotations.length === 0) return { data, changed: false };
+
+  let source: string;
+  try {
+    source = await app.vault.cachedRead(file);
+  } catch {
+    return { data, changed: false };
+  }
+
+  let changed = false;
+  const annotations = data.annotations.map(a => {
+    if (a.anchor.kind !== 'markdown') return a;
+    const repaired = repairAnchor(source, a.anchor);
+    if (!repaired) return a;
+    changed = true;
+    return { ...a, anchor: repaired };
+  });
+
+  return changed ? { data: { ...data, annotations }, changed } : { data, changed: false };
 }
