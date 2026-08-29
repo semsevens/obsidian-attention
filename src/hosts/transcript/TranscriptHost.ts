@@ -9,6 +9,7 @@ import { AttentionSettings } from '../../settings';
 import { paintQuote } from '../paintQuote';
 import { asEl, elementOf } from '../../dom';
 import { ownerOfMarks } from './owner';
+import { claimMenu, onLongPress, onTouchSelection } from '../../ui/touch';
 
 /** Announced by obsidian-media-transcript whenever it rebuilds its transcript. */
 const TRANSCRIPT_RENDERED = 'mt:transcript-rendered';
@@ -61,6 +62,25 @@ export class TranscriptHost {
       window.setTimeout(() => { void this.onSelectionMade(); }, 0);
     });
 
+    // Touch has no mouseup, and a touch selection settles after the finger
+    // lifts rather than when it does.
+    const touched = onTouchSelection(() => {
+      if (!this.settings.popoverOnSelection) return;
+      void this.onSelectionMade();
+    });
+    this.plugin.register(() => touched.dispose());
+
+    // The long press stands in for the right-click below.
+    const pressed = onLongPress((target, at) => {
+      if (!this.inTranscript(target)) return;
+      const hit = asEl(asEl(target)?.closest('.at-hl'));
+      const selected = window.getSelection()?.toString().trim() ?? '';
+      if (!hit && selected.length === 0) return;
+      if (!claimMenu()) return;
+      void this.showMenu({ x: at.clientX, y: at.clientY }, hit);
+    });
+    this.plugin.register(() => pressed.dispose());
+
     this.plugin.registerDomEvent(document, 'click', e => {
       const hit = asEl(asEl(e.target)?.closest('.at-hl'));
       if (!hit || !this.inTranscript(hit)) return;
@@ -79,7 +99,8 @@ export class TranscriptHost {
       if (!hit && selected.length === 0) return;
       e.preventDefault();
       e.stopPropagation();
-      void this.showMenu(e, hit);
+      if (!claimMenu()) return;
+      void this.showMenu({ x: e.clientX, y: e.clientY }, hit);
     };
     document.addEventListener('contextmenu', onContextMenu, true);
     this.plugin.register(() => document.removeEventListener('contextmenu', onContextMenu, true));
@@ -212,7 +233,7 @@ export class TranscriptHost {
     });
   }
 
-  private async showMenu(e: MouseEvent, hit: HTMLElement | null): Promise<void> {
+  private async showMenu(at: { x: number; y: number }, hit: HTMLElement | null): Promise<void> {
     const menu = new Menu();
 
     if (hit) {
@@ -234,7 +255,7 @@ export class TranscriptHost {
         }).open();
       }));
     }
-    menu.showAtMouseEvent(e);
+    menu.showAtPosition(at);
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────

@@ -453,3 +453,31 @@ body.at-style-background .at-hl:hover {
   flex: 1;
   min-width: 0;
 }
+
+/* ── Touch ─────────────────────────────────────────────────────────────────
+   A phone has no pointer to hover with, so anything that appears on hover is
+   simply unreachable there. The row's actions are shown outright instead —
+   a list of marks is short enough that they do not crowd it, and without them
+   the only way to act on a mark would be to go and find it in the note. */
+.is-mobile .at-entry-actions {
+  display: flex;
+}
+
+.is-mobile .at-icon-btn {
+  /* Comfortably larger than a fingertip's worth of certainty. */
+  height: 30px;
+  min-width: 30px;
+  font-size: 14px;
+}
+
+/* The popover is placed against a selection the reader made with a finger,
+   which their hand may still be over; a little more room makes it tappable. */
+.is-mobile .at-popover,
+.is-mobile .at-bubble {
+  font-size: var(--font-ui-medium);
+}
+
+.is-mobile .at-pop-btn {
+  height: 34px;
+  min-width: 34px;
+}

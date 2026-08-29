@@ -13,6 +13,7 @@ import { reveal } from '../hosts/markdown/reveal';
 import { formatWhen } from '../ui/time';
 import { CommentModal } from '../ui/CommentModal';
 import { asEl } from '../dom';
+import { claimMenu, onLongPress } from '../ui/touch';
 import { describeMark } from '../store/describeMark';
 import { preferredTrack, tracksFor } from '../hosts/transcript/trackFor';
 
@@ -330,11 +331,22 @@ export class ReviewView extends ItemView {
 
     // A lost mark has nowhere to jump to; clicking it would do nothing.
     if (!lost) el.addEventListener('click', () => { void this.jumpTo(annotation, targetPath); });
-    el.addEventListener('contextmenu', e => this.entryMenu(e, annotation, targetPath));
+    el.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      if (!claimMenu()) return;
+      this.entryMenu({ x: e.clientX, y: e.clientY }, annotation, targetPath);
+    });
+    // A phone cannot right-click; the row's buttons are always visible there,
+    // and a press still brings the full menu.
+    const pressed = onLongPress((target, at) => {
+      if (!(target instanceof Node) || !el.contains(target)) return;
+      if (!claimMenu()) return;
+      this.entryMenu({ x: at.clientX, y: at.clientY }, annotation, targetPath);
+    });
+    this.register(() => pressed.dispose());
   }
 
-  private entryMenu(e: MouseEvent, annotation: Annotation, targetPath: string): void {
-    e.preventDefault();
+  private entryMenu(at: { x: number; y: number }, annotation: Annotation, targetPath: string): void {
     const menu = new Menu();
     menu.addItem(i => i.setTitle('Go to').setIcon('arrow-right')
       .onClick(() => { void this.jumpTo(annotation, targetPath); }));
@@ -350,7 +362,7 @@ export class ReviewView extends ItemView {
       .onClick(() => { void navigator.clipboard.writeText(annotation.anchor.quote); }));
     menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
       .onClick(() => { void this.plugin.store.remove(targetPath, annotation.id); }));
-    menu.showAtMouseEvent(e);
+    menu.showAtPosition(at);
   }
 
   /**

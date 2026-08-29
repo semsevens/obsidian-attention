@@ -978,6 +978,97 @@ var CommentModal = class extends import_obsidian5.Modal {
   }
 };
 
+// src/ui/touch.ts
+var SELECTION_SETTLED_MS = 400;
+var LONG_PRESS_MS = 500;
+var SLOP_PX = 10;
+function onTouchSelection(done) {
+  let timer = null;
+  let touching = false;
+  const settle = () => {
+    if (timer !== null)
+      window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      timer = null;
+      if (!touching)
+        done();
+    }, SELECTION_SETTLED_MS);
+  };
+  const start = () => {
+    touching = true;
+  };
+  const end = () => {
+    touching = false;
+    settle();
+  };
+  document.addEventListener("touchstart", start, { passive: true });
+  document.addEventListener("touchend", end, { passive: true });
+  document.addEventListener("selectionchange", () => {
+    if (touching)
+      return;
+    settle();
+  });
+  return {
+    dispose() {
+      if (timer !== null)
+        window.clearTimeout(timer);
+      document.removeEventListener("touchstart", start);
+      document.removeEventListener("touchend", end);
+    }
+  };
+}
+function onLongPress(press) {
+  let timer = null;
+  let from = null;
+  let target = null;
+  const cancel = () => {
+    if (timer !== null)
+      window.clearTimeout(timer);
+    timer = null;
+    from = null;
+  };
+  const start = (e) => {
+    if (e.touches.length !== 1)
+      return cancel();
+    from = e.touches[0];
+    target = e.target;
+    timer = window.setTimeout(() => {
+      timer = null;
+      if (from)
+        press(target, from);
+    }, LONG_PRESS_MS);
+  };
+  const move = (e) => {
+    const now = e.touches[0];
+    if (!from || !now)
+      return;
+    if (Math.abs(now.clientX - from.clientX) > SLOP_PX || Math.abs(now.clientY - from.clientY) > SLOP_PX)
+      cancel();
+  };
+  document.addEventListener("touchstart", start, { passive: true });
+  document.addEventListener("touchmove", move, { passive: true });
+  document.addEventListener("touchend", cancel, { passive: true });
+  document.addEventListener("touchcancel", cancel, { passive: true });
+  return {
+    dispose() {
+      cancel();
+      document.removeEventListener("touchstart", start);
+      document.removeEventListener("touchmove", move);
+      document.removeEventListener("touchend", cancel);
+      document.removeEventListener("touchcancel", cancel);
+    }
+  };
+}
+var TOGETHER_MS = 800;
+var raisedAt = 0;
+function claimMenu() {
+  const now = Date.now();
+  if (now - raisedAt < TOGETHER_MS)
+    return false;
+  raisedAt = now;
+  return true;
+}
+
 // src/store/describeMark.ts
 function describeMark(annotation, options) {
   var _a;
@@ -1329,10 +1420,22 @@ var ReviewView = class extends import_obsidian6.ItemView {
       el.addEventListener("click", () => {
         void this.jumpTo(annotation, targetPath);
       });
-    el.addEventListener("contextmenu", (e) => this.entryMenu(e, annotation, targetPath));
+    el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      if (!claimMenu())
+        return;
+      this.entryMenu({ x: e.clientX, y: e.clientY }, annotation, targetPath);
+    });
+    const pressed = onLongPress((target, at) => {
+      if (!(target instanceof Node) || !el.contains(target))
+        return;
+      if (!claimMenu())
+        return;
+      this.entryMenu({ x: at.clientX, y: at.clientY }, annotation, targetPath);
+    });
+    this.register(() => pressed.dispose());
   }
-  entryMenu(e, annotation, targetPath) {
-    e.preventDefault();
+  entryMenu(at, annotation, targetPath) {
     const menu = new import_obsidian6.Menu();
     menu.addItem((i) => i.setTitle("Go to").setIcon("arrow-right").onClick(() => {
       void this.jumpTo(annotation, targetPath);
@@ -1353,7 +1456,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
     menu.addItem((i) => i.setTitle("Remove mark").setIcon("trash").setWarning(true).onClick(() => {
       void this.plugin.store.remove(targetPath, annotation.id);
     }));
-    menu.showAtMouseEvent(e);
+    menu.showAtPosition(at);
   }
   /**
    * Point a lost mark at whatever is selected in the note now.
@@ -1957,6 +2060,23 @@ var MarkdownHost = class {
         void this.onSelectionMade();
       }, 0);
     });
+    const touched = onTouchSelection(() => {
+      if (!this.settings.popoverOnSelection)
+        return;
+      void this.onSelectionMade();
+    });
+    this.plugin.register(() => touched.dispose());
+    const pressed = onLongPress((target, at) => {
+      var _a;
+      this.lastTarget = asEl(target);
+      const view = (_a = this.viewContaining(this.lastTarget)) != null ? _a : this.app.workspace.getActiveViewOfType(import_obsidian9.MarkdownView);
+      if (!(view == null ? void 0 : view.file) || !this.hasSomethingToOffer(view))
+        return;
+      if (!claimMenu())
+        return;
+      void this.showReadingMenu({ x: at.clientX, y: at.clientY }, view);
+    });
+    this.plugin.register(() => pressed.dispose());
     this.plugin.registerDomEvent(document, "click", (e) => {
       var _a, _b, _c, _d;
       if (this.passingThrough)
@@ -1993,7 +2113,9 @@ var MarkdownHost = class {
       if (!this.hasSomethingToOffer(view))
         return;
       e.preventDefault();
-      void this.showReadingMenu(e, view);
+      if (!claimMenu())
+        return;
+      void this.showReadingMenu({ x: e.clientX, y: e.clientY }, view);
     });
   }
   detach() {
@@ -2184,7 +2306,7 @@ var MarkdownHost = class {
       this.addCreateItems(menu, file, anchor);
   }
   // ── Reading mode ───────────────────────────────────────────────────────────
-  async showReadingMenu(e, view) {
+  async showReadingMenu(at, view) {
     var _a, _b, _c, _d;
     const file = view.file;
     if (!file)
@@ -2202,7 +2324,7 @@ var MarkdownHost = class {
         return;
       this.addCreateItems(menu, captured.file, captured.anchor);
     }
-    menu.showAtMouseEvent(e);
+    menu.showAtPosition(at);
   }
   /** Locate a rendered selection in a file's source by ordinal. */
   async captureInFile(file) {
@@ -2956,6 +3078,25 @@ var TranscriptHost = class {
         void this.onSelectionMade();
       }, 0);
     });
+    const touched = onTouchSelection(() => {
+      if (!this.settings.popoverOnSelection)
+        return;
+      void this.onSelectionMade();
+    });
+    this.plugin.register(() => touched.dispose());
+    const pressed = onLongPress((target, at) => {
+      var _a, _b, _c;
+      if (!this.inTranscript(target))
+        return;
+      const hit = asEl((_a = asEl(target)) == null ? void 0 : _a.closest(".at-hl"));
+      const selected = (_c = (_b = window.getSelection()) == null ? void 0 : _b.toString().trim()) != null ? _c : "";
+      if (!hit && selected.length === 0)
+        return;
+      if (!claimMenu())
+        return;
+      void this.showMenu({ x: at.clientX, y: at.clientY }, hit);
+    });
+    this.plugin.register(() => pressed.dispose());
     this.plugin.registerDomEvent(document, "click", (e) => {
       var _a, _b, _c;
       const hit = asEl((_a = asEl(e.target)) == null ? void 0 : _a.closest(".at-hl"));
@@ -2975,7 +3116,9 @@ var TranscriptHost = class {
         return;
       e.preventDefault();
       e.stopPropagation();
-      void this.showMenu(e, hit);
+      if (!claimMenu())
+        return;
+      void this.showMenu({ x: e.clientX, y: e.clientY }, hit);
     };
     document.addEventListener("contextmenu", onContextMenu, true);
     this.plugin.register(() => document.removeEventListener("contextmenu", onContextMenu, true));
@@ -3107,7 +3250,7 @@ var TranscriptHost = class {
       }
     });
   }
-  async showMenu(e, hit) {
+  async showMenu(at, hit) {
     var _a;
     const menu = new import_obsidian12.Menu();
     if (hit) {
@@ -3134,7 +3277,7 @@ var TranscriptHost = class {
         }).open();
       }));
     }
-    menu.showAtMouseEvent(e);
+    menu.showAtPosition(at);
   }
   // ── Actions ────────────────────────────────────────────────────────────────
   async showBubble(el) {

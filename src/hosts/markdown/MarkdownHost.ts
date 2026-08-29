@@ -14,6 +14,7 @@ import { asEl, asImg, elementOf } from '../../dom';
 import { belongsTo, ownerOf } from './ownerView';
 import { isChrome, textBefore } from './renderedText';
 import { blockAround, sourceRangeOf } from './section';
+import { claimMenu, onLongPress, onTouchSelection } from '../../ui/touch';
 import { bodyStart, snapRange } from '../../anchor/snapRange';
 import { WrongNoteError } from '../../store/annotationStore';
 
@@ -75,6 +76,26 @@ export class MarkdownHost {
       window.setTimeout(() => { void this.onSelectionMade(); }, 0);
     });
 
+    // A finger sends no mouseup, and a touch selection keeps changing after it
+    // lifts while the reader drags the handles — so this waits for it to
+    // settle instead. See `onTouchSelection`.
+    const touched = onTouchSelection(() => {
+      if (!this.settings.popoverOnSelection) return;
+      void this.onSelectionMade();
+    });
+    this.plugin.register(() => touched.dispose());
+
+    // A phone cannot right-click. A press that stays still is the same asking.
+    const pressed = onLongPress((target, at) => {
+      this.lastTarget = asEl(target);
+      const view = this.viewContaining(this.lastTarget)
+        ?? this.app.workspace.getActiveViewOfType(MarkdownView);
+      if (!view?.file || !this.hasSomethingToOffer(view)) return;
+      if (!claimMenu()) return;
+      void this.showReadingMenu({ x: at.clientX, y: at.clientY }, view);
+    });
+    this.plugin.register(() => pressed.dispose());
+
     // Clicking a picture: offer marking as well as the zoom that would have
     // happened. Capture phase, because Obsidian's own handler is what opens
     // the image and it has to be headed off before it runs.
@@ -121,7 +142,8 @@ export class MarkdownHost {
       if (!view?.file || view.getMode() !== 'preview') return;
       if (!this.hasSomethingToOffer(view)) return;
       e.preventDefault();
-      void this.showReadingMenu(e, view);
+      if (!claimMenu()) return;
+      void this.showReadingMenu({ x: e.clientX, y: e.clientY }, view);
     });
   }
 
@@ -316,7 +338,7 @@ export class MarkdownHost {
 
   // ── Reading mode ───────────────────────────────────────────────────────────
 
-  private async showReadingMenu(e: MouseEvent, view: MarkdownView): Promise<void> {
+  private async showReadingMenu(at: { x: number; y: number }, view: MarkdownView): Promise<void> {
     const file = view.file;
     if (!file) return;
     const menu = new Menu();
@@ -334,7 +356,7 @@ export class MarkdownHost {
       if (!captured) return;
       this.addCreateItems(menu, captured.file, captured.anchor);
     }
-    menu.showAtMouseEvent(e);
+    menu.showAtPosition(at);
   }
 
   /** Locate a rendered selection in a file's source by ordinal. */
