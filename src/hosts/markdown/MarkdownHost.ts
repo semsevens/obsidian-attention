@@ -12,7 +12,8 @@ import { CommentModal } from '../../ui/CommentModal';
 import { AttentionSettings } from '../../settings';
 import { asEl, asImg, elementOf } from '../../dom';
 import { belongsTo, ownerOf } from './ownerView';
-import { snapRange } from '../../anchor/snapRange';
+import { isChrome, textBefore } from './renderedText';
+import { bodyStart, snapRange } from '../../anchor/snapRange';
 import { WrongNoteError } from '../../store/annotationStore';
 
 /**
@@ -340,6 +341,10 @@ export class MarkdownHost {
     const selection = window.getSelection();
     const selected = selection?.toString() ?? '';
     if (!selection || selected.trim().length === 0) return null;
+    // The properties table and the inline title are Obsidian's, not the note's.
+    // There is nothing in the file to anchor to, so this is not a failure to
+    // report — it is simply not something that can be marked.
+    if (isChrome(selection.getRangeAt(0).startContainer)) return null;
 
     const source = await this.app.vault.cachedRead(file);
     // Search a projection of the source with inline markup stripped — that is
@@ -347,12 +352,19 @@ export class MarkdownHost {
     // refuse any selection containing emphasis, a link or a highlight, which in
     // a real note is most of them.
     const plain = project(source);
-    const at = nthOccurrence(plain.text, selected, this.renderedOrdinal(selection, selected));
+    // Search the body only. Reading mode draws the frontmatter as well — as a
+    // properties table, and again as a block when that is switched on — but
+    // those are not part of the document, and the ordinal counted on screen
+    // skips them. Leaving them in here would make the same phrase land in the
+    // frontmatter, which is a place no mark can live.
+    const body = plain.map.findIndex(at => at >= bodyStart(source));
+    const from = body < 0 ? 0 : body;
+    const at = nthOccurrence(plain.text.slice(from), selected, this.renderedOrdinal(selection, selected));
     if (at < 0) {
       new Notice('Attention: could not find that selection in the note.');
       return null;
     }
-    const range = toSource(plain, at, at + selected.length);
+    const range = toSource(plain, from + at, from + at + selected.length);
     if (!range) return null;
     return this.anchorFor(source, range.from, range.to);
   }
@@ -377,10 +389,13 @@ export class MarkdownHost {
       el?.closest('.cm-content');
     if (!container) return 0;
 
-    const before = sel.cloneRange();
-    before.selectNodeContents(container);
-    before.setEnd(sel.startContainer, sel.startOffset);
-    return countOccurrences(before.toString(), selected);
+    // Not the range's own text: that would count Obsidian's furniture — the
+    // inline title, the properties table, the frontmatter block — which repeats
+    // what the note says and is not in the file.
+    return countOccurrences(
+      textBefore(container, sel.startContainer, sel.startOffset),
+      selected,
+    );
   }
 
   // ── Menu items ─────────────────────────────────────────────────────────────

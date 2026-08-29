@@ -1,4 +1,5 @@
 import { Annotation, isComment } from '../model';
+import { isChrome } from './markdown/renderedText';
 
 /**
  * Wrap occurrences of a quote inside an already-rendered element.
@@ -59,13 +60,22 @@ export function paintQuote(
   for (const s of spans.reverse()) wrap(s.node, s.from, s.to, annotation);
 }
 
-/** Text nodes worth painting: skips anything already inside a mark. */
+/**
+ * Text nodes worth painting.
+ *
+ * Skips anything already inside a mark, and anything Obsidian drew rather than
+ * the note — the properties table repeats what the frontmatter says, so a
+ * phrase that is also a property value would otherwise be marked up there too,
+ * in text the reader never wrote.
+ */
 function textNodesIn(root: HTMLElement): Text[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const out: Text[] = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const text = n as Text;
-    if (text.data.length > 0 && !isInsideHighlight(text)) out.push(text);
+    if (text.data.length === 0) continue;
+    if (isInsideHighlight(text) || isChrome(text)) continue;
+    out.push(text);
   }
   return out;
 }

@@ -1816,6 +1816,50 @@ function belongsTo(view, el) {
   return view !== null && el !== null && view.contains(el);
 }
 
+// src/hosts/markdown/renderedText.ts
+var UI = ["mod-ui", "metadata-container"];
+function isUi(node) {
+  var _a;
+  const el = node;
+  if (typeof ((_a = el.classList) == null ? void 0 : _a.contains) !== "function")
+    return false;
+  return UI.some((cls) => el.classList.contains(cls));
+}
+function textBefore(root, stop, stopOffset) {
+  let out = "";
+  walk(root, (node) => {
+    var _a, _b;
+    if (node === stop) {
+      out += ((_a = node.textContent) != null ? _a : "").slice(0, stopOffset);
+      return "stop";
+    }
+    out += (_b = node.textContent) != null ? _b : "";
+    return "next";
+  });
+  return out;
+}
+function isChrome(node) {
+  for (let at = node; at; at = at.parentNode) {
+    if (isUi(at))
+      return true;
+  }
+  return false;
+}
+function walk(root, visit) {
+  for (const child of Array.from(root.childNodes)) {
+    if (isUi(child))
+      continue;
+    if (child.nodeType === 3) {
+      if (visit(child) === "stop")
+        return "stop";
+      continue;
+    }
+    if (walk(child, visit) === "stop")
+      return "stop";
+  }
+  return "next";
+}
+
 // src/hosts/markdown/MarkdownHost.ts
 var MarkdownHost = class {
   constructor(app, plugin, store, settings) {
@@ -2108,14 +2152,18 @@ var MarkdownHost = class {
     const selected = (_a = selection == null ? void 0 : selection.toString()) != null ? _a : "";
     if (!selection || selected.trim().length === 0)
       return null;
+    if (isChrome(selection.getRangeAt(0).startContainer))
+      return null;
     const source = await this.app.vault.cachedRead(file);
     const plain = project(source);
-    const at = nthOccurrence(plain.text, selected, this.renderedOrdinal(selection, selected));
+    const body = plain.map.findIndex((at2) => at2 >= bodyStart(source));
+    const from = body < 0 ? 0 : body;
+    const at = nthOccurrence(plain.text.slice(from), selected, this.renderedOrdinal(selection, selected));
     if (at < 0) {
       new import_obsidian9.Notice("Attention: could not find that selection in the note.");
       return null;
     }
-    const range = toSource(plain, at, at + selected.length);
+    const range = toSource(plain, from + at, from + at + selected.length);
     if (!range)
       return null;
     return this.anchorFor(source, range.from, range.to);
@@ -2136,10 +2184,10 @@ var MarkdownHost = class {
     const container = (_b = (_a = el == null ? void 0 : el.closest(".markdown-embed-content")) != null ? _a : el == null ? void 0 : el.closest(".markdown-preview-view")) != null ? _b : el == null ? void 0 : el.closest(".cm-content");
     if (!container)
       return 0;
-    const before = sel.cloneRange();
-    before.selectNodeContents(container);
-    before.setEnd(sel.startContainer, sel.startOffset);
-    return countOccurrences(before.toString(), selected);
+    return countOccurrences(
+      textBefore(container, sel.startContainer, sel.startOffset),
+      selected
+    );
   }
   // ── Menu items ─────────────────────────────────────────────────────────────
   addCreateItems(menu, file, anchor) {
@@ -2344,8 +2392,11 @@ function textNodesIn(root) {
   const out = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
     const text = n;
-    if (text.data.length > 0 && !isInsideHighlight(text))
-      out.push(text);
+    if (text.data.length === 0)
+      continue;
+    if (isInsideHighlight(text) || isChrome(text))
+      continue;
+    out.push(text);
   }
   return out;
 }
