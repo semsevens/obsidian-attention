@@ -1503,6 +1503,20 @@ var CommentBubble = class {
   }
 };
 
+// src/hosts/markdown/ownerView.ts
+function ownerOf(views, el) {
+  if (!el)
+    return null;
+  for (const view of views) {
+    if (view.contains(el))
+      return view;
+  }
+  return null;
+}
+function belongsTo(view, el) {
+  return view !== null && el !== null && view.contains(el);
+}
+
 // src/hosts/markdown/MarkdownHost.ts
 var MarkdownHost = class {
   constructor(app, plugin, store, settings) {
@@ -1542,20 +1556,20 @@ var MarkdownHost = class {
       }, 0);
     });
     this.plugin.registerDomEvent(document, "click", (e) => {
-      var _a, _b, _c;
+      var _a, _b, _c, _d;
       if (this.passingThrough)
         return;
       const img = asImg((_a = asEl(e.target)) == null ? void 0 : _a.closest("img"));
       if (!img)
         return;
-      const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
-      if (!(view == null ? void 0 : view.file) || !view.contentEl.contains(img))
+      const view = this.viewContaining(img);
+      if (!(view == null ? void 0 : view.file))
         return;
       if (((_c = (_b = window.getSelection()) == null ? void 0 : _b.toString().trim().length) != null ? _c : 0) > 0)
         return;
       e.preventDefault();
       e.stopPropagation();
-      void this.showImagePopover(view.file, img);
+      void this.showImagePopover((_d = this.embeddedFileAt(img, view.file)) != null ? _d : view.file, img);
     }, true);
     this.plugin.registerDomEvent(document, "click", (e) => {
       var _a, _b, _c, _d;
@@ -1570,7 +1584,8 @@ var MarkdownHost = class {
         void this.showBubble(file, hit);
     });
     this.plugin.registerDomEvent(document, "contextmenu", (e) => {
-      const view = this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
+      var _a;
+      const view = (_a = this.viewContaining(this.lastTarget)) != null ? _a : this.app.workspace.getActiveViewOfType(import_obsidian8.MarkdownView);
       if (!(view == null ? void 0 : view.file) || view.getMode() !== "preview")
         return;
       if (!this.hasSomethingToOffer(view))
@@ -1643,10 +1658,12 @@ var MarkdownHost = class {
   }
   hasSomethingToOffer(view) {
     var _a, _b, _c, _d;
-    if ((_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl"))
-      return true;
-    if ((_b = this.lastTarget) == null ? void 0 : _b.closest("img"))
-      return true;
+    if (belongsTo(view.contentEl, this.lastTarget)) {
+      if ((_a = this.lastTarget) == null ? void 0 : _a.closest(".at-hl"))
+        return true;
+      if ((_b = this.lastTarget) == null ? void 0 : _b.closest("img"))
+        return true;
+    }
     const selection = window.getSelection();
     return ((_c = selection == null ? void 0 : selection.toString().trim().length) != null ? _c : 0) > 0 && view.contentEl.contains((_d = selection == null ? void 0 : selection.anchorNode) != null ? _d : null);
   }
@@ -1676,14 +1693,9 @@ var MarkdownHost = class {
   }
   /** The markdown view whose content contains `el`. */
   viewContaining(el) {
-    if (!el)
-      return null;
-    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
-      const view = leaf.view;
-      if (view instanceof import_obsidian8.MarkdownView && view.contentEl.contains(el))
-        return view;
-    }
-    return null;
+    var _a, _b;
+    const views = this.app.workspace.getLeavesOfType("markdown").map((leaf) => leaf.view).filter((v) => v instanceof import_obsidian8.MarkdownView);
+    return (_b = (_a = ownerOf(views.map((v) => ({ v, contains: (n) => v.contentEl.contains(n) })), el)) == null ? void 0 : _a.v) != null ? _b : null;
   }
   /** The element the selection starts in. */
   selectionElement() {
@@ -1738,7 +1750,7 @@ var MarkdownHost = class {
   }
   // ── Editing modes ──────────────────────────────────────────────────────────
   onEditorMenu(menu, editor, info) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const file = info.file;
     if (!file)
       return;
@@ -1749,7 +1761,7 @@ var MarkdownHost = class {
     }
     const img = asImg((_c = this.lastTarget) == null ? void 0 : _c.closest("img"));
     if (img) {
-      this.addImageItems(menu, file, img);
+      this.addImageItems(menu, (_d = this.embeddedFileAt(img, file)) != null ? _d : file, img);
       return;
     }
     const anchor = this.captureEditor(editor);
@@ -1758,7 +1770,7 @@ var MarkdownHost = class {
   }
   // ── Reading mode ───────────────────────────────────────────────────────────
   async showReadingMenu(e, view) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const file = view.file;
     if (!file)
       return;
@@ -1768,7 +1780,7 @@ var MarkdownHost = class {
     if (existing) {
       this.addExistingItems(menu, (_c = this.embeddedFileAt(existing, file)) != null ? _c : file, existing);
     } else if (img) {
-      this.addImageItems(menu, file, img);
+      this.addImageItems(menu, (_d = this.embeddedFileAt(img, file)) != null ? _d : file, img);
     } else {
       const captured = await this.capture(view);
       if (!captured)

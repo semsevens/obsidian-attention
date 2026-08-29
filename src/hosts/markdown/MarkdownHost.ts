@@ -11,6 +11,7 @@ import { CommentBubble } from '../../ui/CommentBubble';
 import { CommentModal } from '../../ui/CommentModal';
 import { AttentionSettings } from '../../settings';
 import { asEl, asImg, elementOf } from '../../dom';
+import { belongsTo, ownerOf } from './ownerView';
 
 /**
  * Turns a selection in a markdown note into an annotation, via the right-click
@@ -77,13 +78,13 @@ export class MarkdownHost {
       if (this.passingThrough) return;
       const img = asImg(asEl(e.target)?.closest('img'));
       if (!img) return;
-      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
-      if (!view?.file || !view.contentEl.contains(img)) return;
+      const view = this.viewContaining(img);
+      if (!view?.file) return;
       if ((window.getSelection()?.toString().trim().length ?? 0) > 0) return;
 
       e.preventDefault();
       e.stopPropagation();
-      void this.showImagePopover(view.file, img);
+      void this.showImagePopover(this.embeddedFileAt(img, view.file) ?? view.file, img);
     }, true);
 
     // Left-click a highlight to read its comment. Guarded on an empty
@@ -106,7 +107,13 @@ export class MarkdownHost {
     // Reading mode fires no editor-menu, so it needs its own handler. Only
     // intercept when there is actually something to offer.
     this.plugin.registerDomEvent(document, 'contextmenu', e => {
-      const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+      // The note that was clicked in — not whichever one is active. A
+      // right-click in a background split does not activate it first, so
+      // taking the active view's file files the mark under a note that does
+      // not contain what was clicked, where it can never resolve.
+      const view =
+        this.viewContaining(this.lastTarget) ??
+        this.app.workspace.getActiveViewOfType(MarkdownView);
       if (!view?.file || view.getMode() !== 'preview') return;
       if (!this.hasSomethingToOffer(view)) return;
       e.preventDefault();
@@ -168,8 +175,12 @@ export class MarkdownHost {
   }
 
   private hasSomethingToOffer(view: MarkdownView): boolean {
-    if (this.lastTarget?.closest('.at-hl')) return true;
-    if (this.lastTarget?.closest('img')) return true;
+    // Guarded on containment for the same reason the view is looked up by
+    // element: a target from another pane is not this note's to offer.
+    if (belongsTo(view.contentEl, this.lastTarget)) {
+      if (this.lastTarget?.closest('.at-hl')) return true;
+      if (this.lastTarget?.closest('img')) return true;
+    }
     const selection = window.getSelection();
     return (
       (selection?.toString().trim().length ?? 0) > 0 &&
@@ -204,13 +215,12 @@ export class MarkdownHost {
   }
 
   /** The markdown view whose content contains `el`. */
-  private viewContaining(el: HTMLElement | null): MarkdownView | null {
-    if (!el) return null;
-    for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
-      const view = leaf.view;
-      if (view instanceof MarkdownView && view.contentEl.contains(el)) return view;
-    }
-    return null;
+  private viewContaining(el: Node | null): MarkdownView | null {
+    const views = this.app.workspace
+      .getLeavesOfType('markdown')
+      .map(leaf => leaf.view)
+      .filter((v): v is MarkdownView => v instanceof MarkdownView);
+    return ownerOf(views.map(v => ({ v, contains: (n: Node | null) => v.contentEl.contains(n) })), el)?.v ?? null;
   }
 
   /** The element the selection starts in. */
@@ -279,7 +289,7 @@ export class MarkdownHost {
     // A picture can't be selected, so right-clicking one is the way in.
     const img = asImg(this.lastTarget?.closest('img'));
     if (img) {
-      this.addImageItems(menu, file, img);
+      this.addImageItems(menu, this.embeddedFileAt(img, file) ?? file, img);
       return;
     }
 
@@ -299,7 +309,9 @@ export class MarkdownHost {
     if (existing) {
       this.addExistingItems(menu, this.embeddedFileAt(existing, file) ?? file, existing);
     } else if (img) {
-      this.addImageItems(menu, file, img);
+      // A picture inside a transclusion belongs to the note it came from, the
+      // same as a highlight does — the host's text has no embed for it.
+      this.addImageItems(menu, this.embeddedFileAt(img, file) ?? file, img);
     } else {
       const captured = await this.capture(view);
       if (!captured) return;
