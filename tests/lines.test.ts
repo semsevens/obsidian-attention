@@ -68,3 +68,38 @@ describe('intersect', () => {
     expect(intersect({ from: 0, to: 5 }, { from: 9, to: 20 })).toBeNull();
   });
 });
+
+// Offsets are UTF-16 code units, which is what the anchor stores and what
+// `slice` uses — an emoji is two of them, a family emoji considerably more.
+// Line arithmetic has to agree with that or a mark after one drifts.
+describe('text that is not one code unit per character', () => {
+  const NOTE = ['# 标题', '', '中文 English 🎯 混排', '', '👨‍👩‍👧‍👦 家庭', ''].join('\n');
+  const starts = lineStarts(NOTE);
+
+  it('counts lines the same way regardless of what is on them', () => {
+    expect(starts).toHaveLength(6);
+  });
+
+  it('cuts a line containing an emoji at its real bounds', () => {
+    const r = rangeOfLines(NOTE, starts, 2, 2);
+    expect(NOTE.slice(r.from, r.to)).toBe('中文 English 🎯 混排\n');
+  });
+
+  it('cuts a line of multi-codepoint emoji whole', () => {
+    const r = rangeOfLines(NOTE, starts, 4, 4);
+    expect(NOTE.slice(r.from, r.to)).toBe('👨‍👩‍👧‍👦 家庭\n');
+  });
+
+  it('puts an offset inside an emoji on the line it is on', () => {
+    const at = NOTE.indexOf('🎯');
+    expect(lineOf(starts, at)).toBe(2);
+    expect(lineOf(starts, at + 1)).toBe(2);
+  });
+
+  it('intersects ranges that begin mid-emoji without losing the line', () => {
+    const line = rangeOfLines(NOTE, starts, 2, 2);
+    const mark = { from: NOTE.indexOf('🎯'), to: NOTE.indexOf('混排') + 2 };
+    const piece = intersect(mark, line)!;
+    expect(NOTE.slice(piece.from, piece.to)).toBe('🎯 混排');
+  });
+});

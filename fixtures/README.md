@@ -20,6 +20,9 @@ Each one exists for a case that has broken at least once:
 | `图片.md` | frontmatter, then: an image directly under the fence, one sharing its line with a caption, one alone on its line, the same remote image twice, and a very long URL |
 | `图片宿主.md` | transcludes the above — an image marked inside it belongs to `图片.md`, whose source has the embed |
 | `代码与列表.md` | marks in a code block, a list, a quote, and across inline markup |
+| `很长的笔记.md` | long enough that reading mode has not rendered the end of it — a mark there is not in the document until something scrolls to it |
+| `混排与表情.md` | Chinese, English and emoji on one line: offsets are UTF-16 code units, and an emoji is more than one |
+| `同名媒体.md` | a reminder that `x.mp4` and `x.m4a` get a sidecar each |
 
 Every row above is a case that has been wrong at some point. The image ones are
 worth spelling out, since three separate bugs came from them in one afternoon:
