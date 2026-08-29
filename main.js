@@ -61,6 +61,7 @@ var DEFAULT_SETTINGS = {
   autoRevealPanel: true,
   resurfaceCount: 10,
   keepOrphanedSidecars: true,
+  transcriptMarksOnTrack: false,
   // Off by default: deciding how someone's notes open is not this plugin's
   // business until they ask for it.
   forceViewMode: false,
@@ -861,10 +862,10 @@ async function playUntilEndOfLine(media, mediaPath, at) {
   cancelStop = stop;
 }
 var cancelStop = null;
-function segmentStarts(mediaPath) {
-  var _a;
-  const panels = Array.from(document.querySelectorAll(".mt-transcript"));
-  const panel = (_a = panels.map(asEl).find((p) => (p == null ? void 0 : p.dataset.mtMedia) === mediaPath)) != null ? _a : asEl(panels[0]);
+function segmentStarts(owner) {
+  var _a, _b;
+  const panels = Array.from(document.querySelectorAll(".mt-transcript")).map(asEl);
+  const panel = (_b = (_a = panels.find((p) => (p == null ? void 0 : p.dataset.mtTrack) === owner)) != null ? _a : panels.find((p) => (p == null ? void 0 : p.dataset.mtMedia) === owner)) != null ? _b : panels[0];
   if (!panel)
     return [];
   return Array.from(panel.querySelectorAll(".mt-segment")).map((el) => {
@@ -1042,12 +1043,13 @@ var ReviewView = class extends import_obsidian6.ItemView {
   }
   // ── This note ──────────────────────────────────────────────────────────────
   async renderFile(root, seq) {
+    var _a;
     const file = this.app.workspace.getActiveFile();
     if (!file) {
       this.empty(root, "No note open.");
       return;
     }
-    const data = await this.plugin.store.get(file.path);
+    const data = await this.plugin.store.get((_a = displayedTrackFor(file.path)) != null ? _a : file.path);
     if (seq !== this.generation)
       return;
     const text = await this.currentText(file);
@@ -1294,6 +1296,18 @@ function fmtTime(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+function displayedTrackFor(path) {
+  var _a;
+  for (const raw of Array.from(document.querySelectorAll(".mt-transcript"))) {
+    const panel = asEl(raw);
+    if ((panel == null ? void 0 : panel.dataset.mtMedia) !== path)
+      continue;
+    const track = (_a = panel.dataset.mtTrack) == null ? void 0 : _a.trim();
+    if (track)
+      return track;
+  }
+  return null;
 }
 
 // src/store/annotationStore.ts
@@ -2575,6 +2589,11 @@ function resolveTranscript(segs, anchor, currentTrack) {
   return null;
 }
 
+// src/hosts/transcript/owner.ts
+function ownerOfMarks(mediaPath, trackPath) {
+  return trackPath.trim() !== "" ? trackPath : mediaPath;
+}
+
 // src/hosts/transcript/TranscriptHost.ts
 var TRANSCRIPT_RENDERED = "mt:transcript-rendered";
 var TranscriptHost = class {
@@ -2658,7 +2677,8 @@ var TranscriptHost = class {
     const mediaPath = (_b = panel.dataset.mtMedia) != null ? _b : "";
     if (!mediaPath)
       return null;
-    return { panel, mediaPath, trackPath: (_c = panel.dataset.mtTrack) != null ? _c : "" };
+    const trackPath = (_c = panel.dataset.mtTrack) != null ? _c : "";
+    return { panel, mediaPath, trackPath, owner: ownerOfMarks(mediaPath, trackPath) };
   }
   // ── Painting ───────────────────────────────────────────────────────────────
   /** Read the transcript out of the DOM the other plugin rendered. */
@@ -2685,9 +2705,9 @@ var TranscriptHost = class {
     const lines = this.readSegments(panel);
     if (lines.length === 0)
       return;
-    const data = await this.store.get(mediaPath);
-    const segs = lines.map((l) => l.seg);
     const track = (_a = panel.dataset.mtTrack) != null ? _a : null;
+    const data = await this.store.get(ownerOfMarks(mediaPath, track != null ? track : ""));
+    const segs = lines.map((l) => l.seg);
     for (const a of data.annotations) {
       if (a.anchor.kind !== "transcript")
         continue;
@@ -2699,10 +2719,15 @@ var TranscriptHost = class {
         paintQuote(line.txt, a, line.seg.text.slice(hit.charStart, hit.charEnd));
     }
   }
-  repaintOpenPanels(mediaPath) {
+  /** `owner` is whatever the marks are filed under — the track, normally. */
+  repaintOpenPanels(owner) {
+    var _a, _b;
     for (const raw of Array.from(document.querySelectorAll(".mt-transcript"))) {
       const panel = asEl(raw);
-      if ((panel == null ? void 0 : panel.dataset.mtMedia) === mediaPath)
+      if (!panel)
+        continue;
+      const mine = ownerOfMarks((_a = panel.dataset.mtMedia) != null ? _a : "", (_b = panel.dataset.mtTrack) != null ? _b : "");
+      if (mine === owner)
         void this.repaint(panel);
     }
   }
@@ -2736,7 +2761,7 @@ var TranscriptHost = class {
     };
     return {
       anchor: describeTranscript(seg, at, at + selected.length, where.trackPath),
-      mediaPath: where.mediaPath
+      owner: where.owner
     };
   }
   async onSelectionMade() {
@@ -2748,11 +2773,11 @@ var TranscriptHost = class {
       return;
     this.popover.showAt(selection.getRangeAt(0).getBoundingClientRect(), {
       onMark: () => {
-        void this.mark(captured.mediaPath, captured.anchor, null);
+        void this.mark(captured.owner, captured.anchor, null);
       },
       onComment: () => {
         new CommentModal(this.app, captured.anchor.quote, "", (body) => {
-          void this.mark(captured.mediaPath, captured.anchor, body || null);
+          void this.mark(captured.owner, captured.anchor, body || null);
         }).open();
       }
     });
@@ -2761,26 +2786,26 @@ var TranscriptHost = class {
     var _a;
     const menu = new import_obsidian12.Menu();
     if (hit) {
-      const mediaPath = (_a = this.panelOf(hit)) == null ? void 0 : _a.mediaPath;
+      const owner = (_a = this.panelOf(hit)) == null ? void 0 : _a.owner;
       const id = hit.dataset.atId;
-      if (!mediaPath || !id)
+      if (!owner || !id)
         return;
       menu.addItem((i) => i.setTitle("Edit comment\u2026").setIcon("message-square").onClick(() => {
-        void this.editComment(mediaPath, id);
+        void this.editComment(owner, id);
       }));
       menu.addItem((i) => i.setTitle("Remove mark").setIcon("trash").setWarning(true).onClick(() => {
-        void this.store.remove(mediaPath, id);
+        void this.store.remove(owner, id);
       }));
     } else {
       const captured = this.capture();
       if (!captured)
         return;
       menu.addItem((i) => i.setTitle("Mark").setIcon("highlighter").onClick(() => {
-        void this.mark(captured.mediaPath, captured.anchor, null);
+        void this.mark(captured.owner, captured.anchor, null);
       }));
       menu.addItem((i) => i.setTitle("Comment\u2026").setIcon("message-square").onClick(() => {
         new CommentModal(this.app, captured.anchor.quote, "", (body) => {
-          void this.mark(captured.mediaPath, captured.anchor, body || null);
+          void this.mark(captured.owner, captured.anchor, body || null);
         }).open();
       }));
     }
@@ -2789,23 +2814,23 @@ var TranscriptHost = class {
   // ── Actions ────────────────────────────────────────────────────────────────
   async showBubble(el) {
     var _a;
-    const mediaPath = (_a = this.panelOf(el)) == null ? void 0 : _a.mediaPath;
+    const owner = (_a = this.panelOf(el)) == null ? void 0 : _a.owner;
     const id = el.dataset.atId;
-    if (!mediaPath || !id)
+    if (!owner || !id)
       return;
-    const data = await this.store.get(mediaPath);
+    const data = await this.store.get(owner);
     const annotation = data.annotations.find((a) => a.id === id);
     if (!annotation)
       return;
     this.bubble.showFor(el.getBoundingClientRect(), annotation, {
       onEdit: () => {
-        void this.editComment(mediaPath, id);
+        void this.editComment(owner, id);
       },
       onMarkAgain: () => {
-        void this.markAgain(mediaPath, id);
+        void this.markAgain(owner, id);
       },
       onRemove: () => {
-        void this.store.remove(mediaPath, id);
+        void this.store.remove(owner, id);
       }
     });
   }
@@ -2814,22 +2839,45 @@ var TranscriptHost = class {
     if (updated)
       new import_obsidian12.Notice(`Marked ${updated.hits.length}\xD7 now`);
   }
-  async editComment(mediaPath, id) {
+  async editComment(owner, id) {
     var _a;
-    const data = await this.store.get(mediaPath);
+    const data = await this.store.get(owner);
     const annotation = data.annotations.find((a) => a.id === id);
     if (!annotation)
       return;
     new CommentModal(this.app, annotation.anchor.quote, (_a = annotation.body) != null ? _a : "", (body) => {
-      void this.store.update(mediaPath, id, { body: body || null });
+      void this.store.update(owner, id, { body: body || null });
     }).open();
   }
-  async mark(mediaPath, anchor, body) {
-    const { repeat, annotation } = await this.store.mark(mediaPath, anchor, body);
+  async mark(owner, anchor, body) {
+    const { repeat, annotation } = await this.store.mark(owner, anchor, body);
     if (repeat)
       new import_obsidian12.Notice(`Marked ${annotation.hits.length}\xD7 now`);
   }
 };
+
+// src/store/migrateToTrack.ts
+function planMove(target, annotations) {
+  var _a;
+  const byTrack = /* @__PURE__ */ new Map();
+  const keep = [];
+  for (const a of annotations) {
+    const track = a.anchor.kind === "transcript" ? (_a = a.anchor.track) == null ? void 0 : _a.trim() : "";
+    if (!track || track === target) {
+      keep.push(a);
+      continue;
+    }
+    const group = byTrack.get(track);
+    if (group)
+      group.push(a);
+    else
+      byTrack.set(track, [a]);
+  }
+  return {
+    moves: [...byTrack].map(([to, group]) => ({ from: target, to, annotations: group })),
+    keep
+  };
+}
 
 // src/hosts/markdown/viewModeHost.ts
 var import_obsidian13 = require("obsidian");
@@ -3093,6 +3141,7 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
     window.setTimeout(attempt, 0);
   }
   async onLayoutReady() {
+    await this.migrateTranscriptMarks();
     await this.rebuildIndex();
     await this.warmOpenFiles();
     this.applyViewModes();
@@ -3151,6 +3200,41 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
   /** Redraw after a setting that only affects how things are shown. */
   refreshPanels() {
     this.refreshReviewViews();
+  }
+  /**
+   * Re-file transcript marks that were made when they lived on the recording.
+   *
+   * Once, and remembered, because it walks every sidecar in the vault. Each
+   * such anchor already names its track, so nothing is guessed; a mark with no
+   * track named — a transcript made on the fly — stays where it is.
+   */
+  async migrateTranscriptMarks() {
+    if (this.settings.transcriptMarksOnTrack)
+      return;
+    let moved = 0;
+    for (const file of this.app.vault.getFiles()) {
+      if (!isSidecarPath(file.path))
+        continue;
+      const target = targetPathFor(file.path);
+      if (!target)
+        continue;
+      const data = await loadSidecar(this.app, target);
+      const { moves, keep } = planMove(target, data.annotations);
+      if (moves.length === 0)
+        continue;
+      for (const move of moves) {
+        const into = await loadSidecar(this.app, move.to);
+        into.annotations.push(...move.annotations);
+        await saveSidecar(this.app, into);
+        moved += move.annotations.length;
+      }
+      await saveSidecar(this.app, { ...data, annotations: keep });
+    }
+    this.settings.transcriptMarksOnTrack = true;
+    await this.saveSettings();
+    if (moved > 0) {
+      new import_obsidian14.Notice(`Attention: ${moved} transcript mark${moved === 1 ? "" : "s"} now filed under their subtitle track.`);
+    }
   }
   async rebuildIndex() {
     await this.index.rebuild();

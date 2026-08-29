@@ -22,6 +22,7 @@ import {
 import { AnchorTracker } from './anchor/AnchorTracker';
 import { readingModeHighlighter, repaintReadingViews } from './hosts/markdown/readingMode';
 import { TranscriptHost } from './hosts/transcript/TranscriptHost';
+import { planMove } from './store/migrateToTrack';
 import { ViewModeHost } from './hosts/markdown/viewModeHost';
 
 export default class AttentionPlugin extends Plugin {
@@ -157,6 +158,7 @@ export default class AttentionPlugin extends Plugin {
   }
 
   private async onLayoutReady(): Promise<void> {
+    await this.migrateTranscriptMarks();
     await this.rebuildIndex();
     // Notes open at load time never fire `file-open`, so without this their
     // highlights stay unpainted until you switch away and back — which is
@@ -223,6 +225,42 @@ export default class AttentionPlugin extends Plugin {
   /** Redraw after a setting that only affects how things are shown. */
   refreshPanels(): void {
     this.refreshReviewViews();
+  }
+
+  /**
+   * Re-file transcript marks that were made when they lived on the recording.
+   *
+   * Once, and remembered, because it walks every sidecar in the vault. Each
+   * such anchor already names its track, so nothing is guessed; a mark with no
+   * track named — a transcript made on the fly — stays where it is.
+   */
+  private async migrateTranscriptMarks(): Promise<void> {
+    if (this.settings.transcriptMarksOnTrack) return;
+
+    let moved = 0;
+    for (const file of this.app.vault.getFiles()) {
+      if (!isSidecarPath(file.path)) continue;
+      const target = targetPathFor(file.path);
+      if (!target) continue;
+
+      const data = await loadSidecar(this.app, target);
+      const { moves, keep } = planMove(target, data.annotations);
+      if (moves.length === 0) continue;
+
+      for (const move of moves) {
+        const into = await loadSidecar(this.app, move.to);
+        into.annotations.push(...move.annotations);
+        await saveSidecar(this.app, into);
+        moved += move.annotations.length;
+      }
+      await saveSidecar(this.app, { ...data, annotations: keep });
+    }
+
+    this.settings.transcriptMarksOnTrack = true;
+    await this.saveSettings();
+    if (moved > 0) {
+      new Notice(`Attention: ${moved} transcript mark${moved === 1 ? '' : 's'} now filed under their subtitle track.`);
+    }
   }
 
   async rebuildIndex(): Promise<void> {

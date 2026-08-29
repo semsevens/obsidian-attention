@@ -8,6 +8,7 @@ import { CommentModal } from '../../ui/CommentModal';
 import { AttentionSettings } from '../../settings';
 import { paintQuote } from '../paintQuote';
 import { asEl, elementOf } from '../../dom';
+import { ownerOfMarks } from './owner';
 
 /** Announced by obsidian-media-transcript whenever it rebuilds its transcript. */
 const TRANSCRIPT_RENDERED = 'mt:transcript-rendered';
@@ -100,12 +101,15 @@ export class TranscriptHost {
    * enabled while a transcript is already open never sees that event, and state
    * kept only in a handler is state you can miss.
    */
-  private panelOf(target: EventTarget | null): { panel: HTMLElement; mediaPath: string; trackPath: string } | null {
+  private panelOf(
+    target: EventTarget | null,
+  ): { panel: HTMLElement; mediaPath: string; trackPath: string; owner: string } | null {
     const panel = asEl(asEl(target)?.closest('.mt-transcript'));
     if (!panel) return null;
     const mediaPath = panel.dataset.mtMedia ?? '';
     if (!mediaPath) return null;
-    return { panel, mediaPath, trackPath: panel.dataset.mtTrack ?? '' };
+    const trackPath = panel.dataset.mtTrack ?? '';
+    return { panel, mediaPath, trackPath, owner: ownerOfMarks(mediaPath, trackPath) };
   }
 
   // ── Painting ───────────────────────────────────────────────────────────────
@@ -131,9 +135,9 @@ export class TranscriptHost {
     const lines = this.readSegments(panel);
     if (lines.length === 0) return;
 
-    const data = await this.store.get(mediaPath);
-    const segs = lines.map(l => l.seg);
     const track = panel.dataset.mtTrack ?? null;
+    const data = await this.store.get(ownerOfMarks(mediaPath, track ?? ''));
+    const segs = lines.map(l => l.seg);
 
     for (const a of data.annotations) {
       if (a.anchor.kind !== 'transcript') continue;
@@ -146,17 +150,20 @@ export class TranscriptHost {
     }
   }
 
-  private repaintOpenPanels(mediaPath: string): void {
+  /** `owner` is whatever the marks are filed under — the track, normally. */
+  private repaintOpenPanels(owner: string): void {
     for (const raw of Array.from(document.querySelectorAll('.mt-transcript'))) {
       const panel = asEl(raw);
-      if (panel?.dataset.mtMedia === mediaPath) void this.repaint(panel);
+      if (!panel) continue;
+      const mine = ownerOfMarks(panel.dataset.mtMedia ?? '', panel.dataset.mtTrack ?? '');
+      if (mine === owner) void this.repaint(panel);
     }
   }
 
   // ── Capture ────────────────────────────────────────────────────────────────
 
   /** Turn the current selection into an anchor, if it sits inside one line. */
-  private capture(): { anchor: TranscriptAnchor; mediaPath: string } | null {
+  private capture(): { anchor: TranscriptAnchor; owner: string } | null {
     const selection = window.getSelection();
     const selected = selection?.toString() ?? '';
     if (!selection || selected.trim().length === 0) return null;
@@ -185,7 +192,7 @@ export class TranscriptHost {
     };
     return {
       anchor: describeTranscript(seg, at, at + selected.length, where.trackPath),
-      mediaPath: where.mediaPath,
+      owner: where.owner,
     };
   }
 
@@ -196,10 +203,10 @@ export class TranscriptHost {
     if (!selection || selection.rangeCount === 0) return;
 
     this.popover.showAt(selection.getRangeAt(0).getBoundingClientRect(), {
-      onMark: () => { void this.mark(captured.mediaPath, captured.anchor, null); },
+      onMark: () => { void this.mark(captured.owner, captured.anchor, null); },
       onComment: () => {
         new CommentModal(this.app, captured.anchor.quote, '', body => {
-          void this.mark(captured.mediaPath, captured.anchor, body || null);
+          void this.mark(captured.owner, captured.anchor, body || null);
         }).open();
       },
     });
@@ -209,21 +216,21 @@ export class TranscriptHost {
     const menu = new Menu();
 
     if (hit) {
-      const mediaPath = this.panelOf(hit)?.mediaPath;
+      const owner = this.panelOf(hit)?.owner;
       const id = hit.dataset.atId;
-      if (!mediaPath || !id) return;
+      if (!owner || !id) return;
       menu.addItem(i => i.setTitle('Edit comment…').setIcon('message-square')
-        .onClick(() => { void this.editComment(mediaPath, id); }));
+        .onClick(() => { void this.editComment(owner, id); }));
       menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
-        .onClick(() => { void this.store.remove(mediaPath, id); }));
+        .onClick(() => { void this.store.remove(owner, id); }));
     } else {
       const captured = this.capture();
       if (!captured) return;
       menu.addItem(i => i.setTitle('Mark').setIcon('highlighter')
-        .onClick(() => { void this.mark(captured.mediaPath, captured.anchor, null); }));
+        .onClick(() => { void this.mark(captured.owner, captured.anchor, null); }));
       menu.addItem(i => i.setTitle('Comment…').setIcon('message-square').onClick(() => {
         new CommentModal(this.app, captured.anchor.quote, '', body => {
-          void this.mark(captured.mediaPath, captured.anchor, body || null);
+          void this.mark(captured.owner, captured.anchor, body || null);
         }).open();
       }));
     }
@@ -233,17 +240,17 @@ export class TranscriptHost {
   // ── Actions ────────────────────────────────────────────────────────────────
 
   private async showBubble(el: HTMLElement): Promise<void> {
-    const mediaPath = this.panelOf(el)?.mediaPath;
+    const owner = this.panelOf(el)?.owner;
     const id = el.dataset.atId;
-    if (!mediaPath || !id) return;
-    const data = await this.store.get(mediaPath);
+    if (!owner || !id) return;
+    const data = await this.store.get(owner);
     const annotation = data.annotations.find(a => a.id === id);
     if (!annotation) return;
 
     this.bubble.showFor(el.getBoundingClientRect(), annotation, {
-      onEdit: () => { void this.editComment(mediaPath, id); },
-      onMarkAgain: () => { void this.markAgain(mediaPath, id); },
-      onRemove: () => { void this.store.remove(mediaPath, id); },
+      onEdit: () => { void this.editComment(owner, id); },
+      onMarkAgain: () => { void this.markAgain(owner, id); },
+      onRemove: () => { void this.store.remove(owner, id); },
     });
   }
 
@@ -252,17 +259,17 @@ export class TranscriptHost {
     if (updated) new Notice(`Marked ${updated.hits.length}× now`);
   }
 
-  private async editComment(mediaPath: string, id: string): Promise<void> {
-    const data = await this.store.get(mediaPath);
+  private async editComment(owner: string, id: string): Promise<void> {
+    const data = await this.store.get(owner);
     const annotation = data.annotations.find(a => a.id === id);
     if (!annotation) return;
     new CommentModal(this.app, annotation.anchor.quote, annotation.body ?? '', body => {
-      void this.store.update(mediaPath, id, { body: body || null });
+      void this.store.update(owner, id, { body: body || null });
     }).open();
   }
 
-  private async mark(mediaPath: string, anchor: TranscriptAnchor, body: string | null): Promise<void> {
-    const { repeat, annotation } = await this.store.mark(mediaPath, anchor, body);
+  private async mark(owner: string, anchor: TranscriptAnchor, body: string | null): Promise<void> {
+    const { repeat, annotation } = await this.store.mark(owner, anchor, body);
     if (repeat) new Notice(`Marked ${annotation.hits.length}× now`);
   }
 }

@@ -104,10 +104,18 @@ async function playUntilEndOfLine(
 /** Cancels the stop set by the last reveal, so two clicks don't both fire. */
 let cancelStop: (() => void) | null = null;
 
-/** Every segment start in the transcript rendered for this media. */
-function segmentStarts(mediaPath: string): number[] {
-  const panels = Array.from(document.querySelectorAll('.mt-transcript'));
-  const panel = panels.map(asEl).find(p => p?.dataset.mtMedia === mediaPath) ?? asEl(panels[0]);
+/**
+ * Every segment start in the transcript this mark belongs to.
+ *
+ * Marks are filed under the track, so that is what usually matches; a player
+ * showing a transcript it made itself is named by its recording instead.
+ */
+function segmentStarts(owner: string): number[] {
+  const panels = Array.from(document.querySelectorAll('.mt-transcript')).map(asEl);
+  const panel =
+    panels.find(p => p?.dataset.mtTrack === owner) ??
+    panels.find(p => p?.dataset.mtMedia === owner) ??
+    panels[0];
   if (!panel) return [];
   return Array.from(panel.querySelectorAll('.mt-segment'))
     .map(el => Number(asEl(el)?.dataset.mtStart))

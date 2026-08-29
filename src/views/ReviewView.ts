@@ -12,6 +12,7 @@ import { isImageQuote } from '../anchor/imageAnchor';
 import { reveal } from '../hosts/markdown/reveal';
 import { formatWhen } from '../ui/time';
 import { CommentModal } from '../ui/CommentModal';
+import { asEl } from '../dom';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
 
@@ -135,7 +136,11 @@ export class ReviewView extends ItemView {
 
     // No early return on an empty file: a note with nothing of its own can
     // still be showing marks from something it transcludes.
-    const data = await this.plugin.store.get(file.path);
+    //
+    // A recording keeps its marks on the subtitle track they were read from,
+    // so opening the recording has to follow that link — otherwise the marks
+    // are filed correctly and visible nowhere.
+    const data = await this.plugin.store.get(displayedTrackFor(file.path) ?? file.path);
     if (seq !== this.generation) return;
 
     // Read once, and use it for both ordering and deciding what's still
@@ -396,4 +401,21 @@ function fmtTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/**
+ * The track a recording is currently being read through, if one is on screen.
+ *
+ * Asking the rendered transcript rather than guessing from filenames: it is
+ * the other plugin that decides which track a recording is shown with, and the
+ * marks worth listing are the ones for the words actually in front of you.
+ */
+function displayedTrackFor(path: string): string | null {
+  for (const raw of Array.from(document.querySelectorAll('.mt-transcript'))) {
+    const panel = asEl(raw);
+    if (panel?.dataset.mtMedia !== path) continue;
+    const track = panel.dataset.mtTrack?.trim();
+    if (track) return track;
+  }
+  return null;
 }

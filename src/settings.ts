@@ -52,6 +52,12 @@ export interface AttentionSettings extends ViewModeSettings {
 
   /** Keep the sidecar when its target file is deleted (recoverable mistakes). */
   keepOrphanedSidecars: boolean;
+
+  /**
+   * Whether the one-time move of transcript marks onto their track has run.
+   * Not a preference — a note to self, so the vault isn't walked every start.
+   */
+  transcriptMarksOnTrack: boolean;
 }
 
 export const DEFAULT_SETTINGS: AttentionSettings = {
@@ -65,6 +71,7 @@ export const DEFAULT_SETTINGS: AttentionSettings = {
   autoRevealPanel: true,
   resurfaceCount: 10,
   keepOrphanedSidecars: true,
+  transcriptMarksOnTrack: false,
   // Off by default: deciding how someone's notes open is not this plugin's
   // business until they ask for it.
   forceViewMode: false,
