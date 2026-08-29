@@ -949,6 +949,58 @@ var CommentModal = class extends import_obsidian5.Modal {
   }
 };
 
+// src/hosts/transcript/trackFor.ts
+var SUBTITLE_EXTENSIONS = ["srt", "vtt", "json"];
+var FORMAT_ORDER = SUBTITLE_EXTENSIONS;
+function tracksFor(paths, mediaPath, subtitleDir) {
+  var _a, _b;
+  const mediaDir = dirOf(mediaPath);
+  const base = baseNameOf(mediaPath);
+  const searchDir = subtitleDir.trim() !== "" ? trimSlashes(subtitleDir) : mediaDir;
+  const out = [];
+  for (const path of paths) {
+    if (dirOf(path) !== searchDir)
+      continue;
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    if (!name.startsWith(base + "."))
+      continue;
+    const rest = name.slice(base.length + 1).split(".");
+    const extension = ((_a = rest.pop()) != null ? _a : "").toLowerCase();
+    if (!SUBTITLE_EXTENSIONS.includes(extension))
+      continue;
+    if (rest.length > 1)
+      continue;
+    out.push({ path, marker: (_b = rest[0]) != null ? _b : "", extension });
+  }
+  return out;
+}
+function preferredTrack(tracks, markers) {
+  if (tracks.length === 0)
+    return null;
+  const rankOf = new Map(markers.map((m, i) => [m.trim(), i]));
+  const rank = (t) => {
+    var _a;
+    return (_a = rankOf.get(t.marker.trim())) != null ? _a : markers.length;
+  };
+  const format = (t) => {
+    const at = FORMAT_ORDER.indexOf(t.extension);
+    return at < 0 ? FORMAT_ORDER.length : at;
+  };
+  return [...tracks].map((track, found_at) => ({ track, found_at })).sort((a, b) => rank(a.track) - rank(b.track) || format(a.track) - format(b.track) || a.found_at - b.found_at)[0].track.path;
+}
+function dirOf(path) {
+  const at = path.lastIndexOf("/");
+  return at < 0 ? "" : path.slice(0, at);
+}
+function baseNameOf(path) {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot <= 0 ? name : name.slice(0, dot);
+}
+function trimSlashes(path) {
+  return path.trim().replace(/^\/+|\/+$/g, "");
+}
+
 // src/views/ReviewView.ts
 var VIEW_TYPE_REVIEW = "attention-review";
 var BUCKET_LABELS = {
@@ -1049,7 +1101,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
       this.empty(root, "No note open.");
       return;
     }
-    const data = await this.plugin.store.get((_a = displayedTrackFor(file.path)) != null ? _a : file.path);
+    const data = await this.plugin.store.get((_a = trackForMedia(this.app, file.path)) != null ? _a : file.path);
     if (seq !== this.generation)
       return;
     const text = await this.currentText(file);
@@ -1297,8 +1349,8 @@ function fmtTime(seconds) {
   const s = Math.floor(seconds % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
 }
-function displayedTrackFor(path) {
-  var _a;
+function trackForMedia(app, path) {
+  var _a, _b, _c;
   for (const raw of Array.from(document.querySelectorAll(".mt-transcript"))) {
     const panel = asEl(raw);
     if ((panel == null ? void 0 : panel.dataset.mtMedia) !== path)
@@ -1307,7 +1359,18 @@ function displayedTrackFor(path) {
     if (track)
       return track;
   }
-  return null;
+  const settings = mediaTranscriptSettings(app);
+  const tracks = tracksFor(
+    app.vault.getFiles().map((f) => f.path),
+    path,
+    (_b = settings == null ? void 0 : settings.subtitleDirectory) != null ? _b : ""
+  );
+  return preferredTrack(tracks, ((_c = settings == null ? void 0 : settings.priorities) != null ? _c : []).map((p) => p.marker));
+}
+function mediaTranscriptSettings(app) {
+  var _a, _b, _c;
+  const plugins = app.plugins;
+  return (_c = (_b = (_a = plugins == null ? void 0 : plugins.plugins) == null ? void 0 : _a["media-transcript"]) == null ? void 0 : _b.settings) != null ? _c : null;
 }
 
 // src/store/annotationStore.ts

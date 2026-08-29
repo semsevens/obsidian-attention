@@ -1,4 +1,4 @@
-import { ItemView, Menu, Notice, WorkspaceLeaf, TFile, MarkdownRenderer } from 'obsidian';
+import { App, ItemView, Menu, Notice, WorkspaceLeaf, TFile, MarkdownRenderer } from 'obsidian';
 import type AttentionPlugin from '../main';
 import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
 import { Annotation, isComment, lastMarked } from '../model';
@@ -13,6 +13,7 @@ import { reveal } from '../hosts/markdown/reveal';
 import { formatWhen } from '../ui/time';
 import { CommentModal } from '../ui/CommentModal';
 import { asEl } from '../dom';
+import { preferredTrack, tracksFor } from '../hosts/transcript/trackFor';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
 
@@ -140,7 +141,7 @@ export class ReviewView extends ItemView {
     // A recording keeps its marks on the subtitle track they were read from,
     // so opening the recording has to follow that link — otherwise the marks
     // are filed correctly and visible nowhere.
-    const data = await this.plugin.store.get(displayedTrackFor(file.path) ?? file.path);
+    const data = await this.plugin.store.get(trackForMedia(this.app, file.path) ?? file.path);
     if (seq !== this.generation) return;
 
     // Read once, and use it for both ordering and deciding what's still
@@ -404,18 +405,47 @@ function fmtTime(seconds: number): string {
 }
 
 /**
- * The track a recording is currently being read through, if one is on screen.
+ * The track a recording's marks are filed under.
  *
- * Asking the rendered transcript rather than guessing from filenames: it is
- * the other plugin that decides which track a recording is shown with, and the
- * marks worth listing are the ones for the words actually in front of you.
+ * A transcript on screen answers first: it is Media Transcript's own decision,
+ * and it survives the reader switching tracks by hand, which no rule can
+ * predict. With nothing on screen the same rule that plugin uses is applied —
+ * its naming convention, ordered by the priority list read from its settings —
+ * so both arrive at the same track and marks are not filed where nobody looks.
  */
-function displayedTrackFor(path: string): string | null {
+function trackForMedia(app: App, path: string): string | null {
   for (const raw of Array.from(document.querySelectorAll('.mt-transcript'))) {
     const panel = asEl(raw);
     if (panel?.dataset.mtMedia !== path) continue;
     const track = panel.dataset.mtTrack?.trim();
     if (track) return track;
   }
-  return null;
+
+  const settings = mediaTranscriptSettings(app);
+  const tracks = tracksFor(
+    app.vault.getFiles().map((f: TFile) => f.path),
+    path,
+    settings?.subtitleDirectory ?? '',
+  );
+  return preferredTrack(tracks, (settings?.priorities ?? []).map(p => p.marker));
+}
+
+interface MediaTranscriptSettings {
+  subtitleDirectory?: string;
+  priorities?: { marker: string }[];
+}
+
+/**
+ * Media Transcript's settings, if it is installed and running.
+ *
+ * `app.plugins` is not in the public typings — this is the only way to ask
+ * another plugin what the reader configured, and asking beats keeping a second
+ * copy of the answer that can drift from theirs. Absent or shaped differently,
+ * the answer is simply nothing, and the convention's own defaults apply.
+ */
+function mediaTranscriptSettings(app: App): MediaTranscriptSettings | null {
+  const plugins = (app as unknown as {
+    plugins?: { plugins?: Record<string, { settings?: MediaTranscriptSettings }> };
+  }).plugins;
+  return plugins?.plugins?.['media-transcript']?.settings ?? null;
 }
