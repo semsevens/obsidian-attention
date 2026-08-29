@@ -806,6 +806,39 @@ function endOfSegment(starts, start, duration) {
   return Number.isFinite(duration) && duration > start ? duration : PLAY_ON;
 }
 
+// src/anchor/lines.ts
+function lineStarts(source) {
+  const starts = [0];
+  for (let i = 0; i < source.length; i++) {
+    if (source[i] === "\n")
+      starts.push(i + 1);
+  }
+  return starts;
+}
+function rangeOfLines(source, starts, from, to) {
+  var _a;
+  const first = (_a = starts[Math.max(0, Math.min(from, starts.length - 1))]) != null ? _a : 0;
+  const after = starts[to + 1];
+  return { from: first, to: after === void 0 ? source.length : after };
+}
+function lineOf(starts, offset) {
+  let low = 0;
+  let high = starts.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (starts[mid] <= offset)
+      low = mid;
+    else
+      high = mid - 1;
+  }
+  return low;
+}
+function intersect(a, b) {
+  const from = Math.max(a.from, b.from);
+  const to = Math.min(a.to, b.to);
+  return to > from ? { from, to } : null;
+}
+
 // src/hosts/markdown/reveal.ts
 async function reveal(app, file, annotation) {
   if (annotation.anchor.kind === "transcript") {
@@ -911,17 +944,9 @@ async function revealInMarkdown(app, file, annotation) {
     const source = await app.vault.cachedRead(file);
     const at = resolveMarkdown(source, annotation.anchor);
     if (at)
-      view.previewMode.applyScroll(lineAt(source, at.from));
+      view.previewMode.applyScroll(lineOf(lineStarts(source), at.from));
   }
   await flashWhenPainted(view, annotation.id);
-}
-function lineAt(source, offset) {
-  let line = 0;
-  for (let i = 0; i < offset && i < source.length; i++) {
-    if (source[i] === "\n")
-      line++;
-  }
-  return line;
 }
 async function flashWhenPainted(view, id, tries = 20) {
   for (let i = 0; i < tries; i++) {
@@ -1975,27 +2000,6 @@ function walk(root, visit) {
       return "stop";
   }
   return "next";
-}
-
-// src/anchor/lines.ts
-function lineStarts(source) {
-  const starts = [0];
-  for (let i = 0; i < source.length; i++) {
-    if (source[i] === "\n")
-      starts.push(i + 1);
-  }
-  return starts;
-}
-function rangeOfLines(source, starts, from, to) {
-  var _a;
-  const first = (_a = starts[Math.max(0, Math.min(from, starts.length - 1))]) != null ? _a : 0;
-  const after = starts[to + 1];
-  return { from: first, to: after === void 0 ? source.length : after };
-}
-function intersect(a, b) {
-  const from = Math.max(a.from, b.from);
-  const to = Math.min(a.to, b.to);
-  return to > from ? { from, to } : null;
 }
 
 // src/hosts/markdown/section.ts

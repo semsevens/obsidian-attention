@@ -3,6 +3,7 @@ import { Annotation } from '../../model';
 import { resolveMarkdown } from '../../anchor/resolveAnchor';
 import { asEl, asMedia } from '../../dom';
 import { endOfSegment, PLAY_ON } from '../transcript/segmentEnd';
+import { lineOf, lineStarts } from '../../anchor/lines';
 
 /**
  * Go to an annotation: open its file and put the passage in front of you.
@@ -160,18 +161,9 @@ async function revealInMarkdown(
   if (annotation.anchor.kind === 'markdown') {
     const source = await app.vault.cachedRead(file);
     const at = resolveMarkdown(source, annotation.anchor);
-    if (at) view.previewMode.applyScroll(lineAt(source, at.from));
+    if (at) view.previewMode.applyScroll(lineOf(lineStarts(source), at.from));
   }
   await flashWhenPainted(view, annotation.id);
-}
-
-/** Which line of the source an offset falls on, counting from zero. */
-function lineAt(source: string, offset: number): number {
-  let line = 0;
-  for (let i = 0; i < offset && i < source.length; i++) {
-    if (source[i] === '\n') line++;
-  }
-  return line;
 }
 
 /**
