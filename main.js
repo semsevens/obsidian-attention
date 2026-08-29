@@ -3394,6 +3394,15 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
     this.registerEvent(this.app.workspace.on("layout-change", () => {
       repaintReadingViews(this.app, provider);
     }));
+    let scrolled = null;
+    this.registerDomEvent(document, "scroll", () => {
+      if (scrolled !== null)
+        window.clearTimeout(scrolled);
+      scrolled = window.setTimeout(() => {
+        scrolled = null;
+        repaintReadingViews(this.app, provider);
+      }, 80);
+    }, true);
     this.markdownHost = new MarkdownHost(this.app, this, this.store, this.settings);
     this.markdownHost.register();
   }

@@ -208,6 +208,20 @@ export default class AttentionPlugin extends Plugin {
       repaintReadingViews(this.app, provider);
     }));
 
+    // Reading mode keeps rendered sections and re-attaches them as they come
+    // back into view, which does not re-run the post-processor — so a mark
+    // scrolled off and back again would return unpainted. Scroll does not
+    // bubble, hence the capture phase; painting is idempotent and debounced, so
+    // reacting to all of them is cheap.
+    let scrolled: number | null = null;
+    this.registerDomEvent(document, 'scroll', () => {
+      if (scrolled !== null) window.clearTimeout(scrolled);
+      scrolled = window.setTimeout(() => {
+        scrolled = null;
+        repaintReadingViews(this.app, provider);
+      }, 80);
+    }, true);
+
     this.markdownHost = new MarkdownHost(this.app, this, this.store, this.settings);
     this.markdownHost.register();
   }
