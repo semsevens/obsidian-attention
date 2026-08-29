@@ -2,7 +2,7 @@ import { App, MarkdownView, TFile } from 'obsidian';
 import { Annotation } from '../../model';
 import { resolveMarkdown } from '../../anchor/resolveAnchor';
 import { asEl, asMedia } from '../../dom';
-import { endOfPassage, PLAY_ON, Segment, startOfMark } from '../transcript/segmentEnd';
+import { endOfSegment, PLAY_ON } from '../transcript/segmentEnd';
 
 /**
  * Go to an annotation: open its file and put the passage in front of you.
@@ -35,16 +35,15 @@ async function revealInTranscript(app: App, file: TFile, annotation: Annotation)
   const media = await waitFor(() => asMedia(document.querySelector('.mt-view video, .mt-view audio')));
   if (!media) return;
 
-  // The transcript is another plugin's to render and arrives when it arrives.
-  // Without it there is only the line's start to go on, which for a line of
-  // forty seconds is nowhere near the words that were marked.
-  const lines = (await waitFor(() => nonEmpty(segmentsOf(file.path)))) ?? [];
-  const at = seekPoint(lines, anchor.start, anchor.charStart, media.duration);
+  // The transcript is another plugin's to render and arrives when it arrives;
+  // without it there is no end to stop at, only a start to seek to.
+  const starts = (await waitFor(() => nonEmpty(segmentStarts(file.path)))) ?? [];
+  const at = anchor.start;
 
   const seek = () => { media.currentTime = at; };
   if (media.readyState > 0) seek();
   else media.addEventListener('loadedmetadata', seek, { once: true });
-  void playUntilEndOfPassage(media, lines, anchor.start, media.duration);
+  playUntilEndOfSegment(media, starts, at, media.duration);
   void media.play();
 
   const painted = asEl(document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`));
@@ -52,27 +51,6 @@ async function revealInTranscript(app: App, file: TFile, annotation: Annotation)
     painted.scrollIntoView({ behavior: 'smooth', block: 'center' });
     flash(painted);
   }
-}
-
-/**
- * Where to start playing: inside the marked line, at the marked words.
- *
- * The line's end is taken from where the next one begins, transcripts being
- * written back to back; the last line ends with the recording.
- */
-function seekPoint(
-  lines: readonly Segment[],
-  start: number,
-  charStart: number,
-  duration: number,
-): number {
-  const ordered = [...lines].sort((a, b) => a.start - b.start);
-  const i = ordered.findIndex(l => l.start > start - 0.01);
-  if (i < 0) return start;
-
-  const line = ordered[i];
-  const end = ordered[i + 1]?.start ?? duration;
-  return startOfMark(line.start, end, line.text, charStart);
 }
 
 function nonEmpty<T>(items: T[]): T[] | null {
@@ -90,22 +68,26 @@ async function waitFor<T>(look: () => T | null, tries = 40): Promise<T | null> {
 }
 
 /**
- * Stop at the end of the passage that was marked.
+ * Stop at the end of the segment that was marked.
  *
- * Clicking a mark asks to hear *that*, not to start a session — so playback
- * stops where the passage does instead of running on into the rest of the
- * recording. Anything the listener does afterwards is theirs: pressing play
- * again, or seeking, clears the stop rather than fighting it.
+ * Clicking a mark asks to hear that passage, not to start a session — so
+ * playback stops where the segment does instead of running on into the rest of
+ * the recording. Anything the listener does afterwards is theirs: pressing
+ * play again, or seeking, clears the stop rather than fighting it.
+ *
+ * The segment is the unit because it is the only one the file actually has:
+ * these transcripts time a whole paragraph and nothing inside it, so anything
+ * finer would be guessed rather than known.
  */
-function playUntilEndOfPassage(
+function playUntilEndOfSegment(
   media: HTMLMediaElement,
-  lines: readonly Segment[],
+  starts: readonly number[],
   start: number,
   duration: number,
 ): void {
   cancelStop?.();
 
-  const until = endOfPassage(lines, start, duration);
+  const until = endOfSegment(starts, start, duration);
   if (until === PLAY_ON) return;
 
   const check = () => {
@@ -130,14 +112,12 @@ function playUntilEndOfPassage(
 let cancelStop: (() => void) | null = null;
 
 /**
- * The transcript this mark belongs to, as lines with their text.
+ * Every segment start in the transcript this mark belongs to.
  *
  * Marks are filed under the track, so that is what usually matches; a player
- * showing a transcript it made itself is named by its recording instead. The
- * text comes along because where a passage ends is a question about sentences,
- * not only about timings.
+ * showing a transcript it made itself is named by its recording instead.
  */
-function segmentsOf(owner: string): Segment[] {
+function segmentStarts(owner: string): number[] {
   const panels = Array.from(document.querySelectorAll('.mt-transcript')).map(asEl);
   const panel =
     panels.find(p => p?.dataset.mtTrack === owner) ??
@@ -146,14 +126,8 @@ function segmentsOf(owner: string): Segment[] {
   if (!panel) return [];
 
   return Array.from(panel.querySelectorAll('.mt-segment'))
-    .map(raw => {
-      const el = asEl(raw);
-      return {
-        start: Number(el?.dataset.mtStart),
-        text: asEl(el?.querySelector('.mt-txt'))?.textContent ?? '',
-      };
-    })
-    .filter(s => Number.isFinite(s.start));
+    .map(raw => Number(asEl(raw)?.dataset.mtStart))
+    .filter(n => Number.isFinite(n));
 }
 
 async function revealInMarkdown(

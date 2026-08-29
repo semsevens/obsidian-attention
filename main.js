@@ -795,34 +795,6 @@ function endOfSegment(starts, start, duration) {
     return next;
   return Number.isFinite(duration) && duration > start ? duration : PLAY_ON;
 }
-var ENDS_SENTENCE = /[。．.！!？?…]+["'’”」』）)\]]*\s*$/;
-var MOST_SEGMENTS = 12;
-var MOST_SECONDS = 45;
-function endOfPassage(segments, start, duration) {
-  const ordered = [...segments].filter((s) => Number.isFinite(s.start)).sort((a, b) => a.start - b.start);
-  const starts = ordered.map((s) => s.start);
-  const first = ordered.findIndex((s) => s.start > start - SAME_MOMENT);
-  if (first < 0)
-    return endOfSegment(starts, start, duration);
-  for (let i = first; i < ordered.length && i - first < MOST_SEGMENTS; i++) {
-    const closes = ENDS_SENTENCE.test(ordered[i].text.trim());
-    const over = ordered[i].start - start > MOST_SECONDS;
-    if (closes || over)
-      return endOfSegment(starts, ordered[i].start, duration);
-  }
-  const last = ordered[Math.min(first + MOST_SEGMENTS - 1, ordered.length - 1)];
-  return endOfSegment(starts, last.start, duration);
-}
-var LEAD_IN = 0.4;
-var WORTH_SEEKING_INTO = 3;
-function startOfMark(segmentStart, segmentEnd, text, charStart) {
-  const span = segmentEnd - segmentStart;
-  if (!Number.isFinite(span) || span < WORTH_SEEKING_INTO || text.length === 0)
-    return segmentStart;
-  const through = Math.min(Math.max(charStart, 0), text.length) / text.length;
-  const at = segmentStart + through * span - LEAD_IN;
-  return Math.max(segmentStart, at);
-}
 
 // src/hosts/markdown/reveal.ts
 async function reveal(app, file, annotation) {
@@ -841,8 +813,8 @@ async function revealInTranscript(app, file, annotation) {
   const media = await waitFor(() => asMedia(document.querySelector(".mt-view video, .mt-view audio")));
   if (!media)
     return;
-  const lines = (_a = await waitFor(() => nonEmpty(segmentsOf(file.path)))) != null ? _a : [];
-  const at = seekPoint(lines, anchor.start, anchor.charStart, media.duration);
+  const starts = (_a = await waitFor(() => nonEmpty(segmentStarts(file.path)))) != null ? _a : [];
+  const at = anchor.start;
   const seek = () => {
     media.currentTime = at;
   };
@@ -850,23 +822,13 @@ async function revealInTranscript(app, file, annotation) {
     seek();
   else
     media.addEventListener("loadedmetadata", seek, { once: true });
-  void playUntilEndOfPassage(media, lines, anchor.start, media.duration);
+  playUntilEndOfSegment(media, starts, at, media.duration);
   void media.play();
   const painted = asEl(document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`));
   if (painted) {
     painted.scrollIntoView({ behavior: "smooth", block: "center" });
     flash(painted);
   }
-}
-function seekPoint(lines, start, charStart, duration) {
-  var _a, _b;
-  const ordered = [...lines].sort((a, b) => a.start - b.start);
-  const i = ordered.findIndex((l) => l.start > start - 0.01);
-  if (i < 0)
-    return start;
-  const line = ordered[i];
-  const end = (_b = (_a = ordered[i + 1]) == null ? void 0 : _a.start) != null ? _b : duration;
-  return startOfMark(line.start, end, line.text, charStart);
 }
 function nonEmpty(items) {
   return items.length > 0 ? items : null;
@@ -880,9 +842,9 @@ async function waitFor(look, tries = 40) {
   }
   return null;
 }
-function playUntilEndOfPassage(media, lines, start, duration) {
+function playUntilEndOfSegment(media, starts, start, duration) {
   cancelStop == null ? void 0 : cancelStop();
-  const until = endOfPassage(lines, start, duration);
+  const until = endOfSegment(starts, start, duration);
   if (until === PLAY_ON)
     return;
   const check = () => {
@@ -905,20 +867,16 @@ function playUntilEndOfPassage(media, lines, start, duration) {
   cancelStop = stop;
 }
 var cancelStop = null;
-function segmentsOf(owner) {
+function segmentStarts(owner) {
   var _a, _b;
   const panels = Array.from(document.querySelectorAll(".mt-transcript")).map(asEl);
   const panel = (_b = (_a = panels.find((p) => (p == null ? void 0 : p.dataset.mtTrack) === owner)) != null ? _a : panels.find((p) => (p == null ? void 0 : p.dataset.mtMedia) === owner)) != null ? _b : panels[0];
   if (!panel)
     return [];
   return Array.from(panel.querySelectorAll(".mt-segment")).map((raw) => {
-    var _a2, _b2;
-    const el = asEl(raw);
-    return {
-      start: Number(el == null ? void 0 : el.dataset.mtStart),
-      text: (_b2 = (_a2 = asEl(el == null ? void 0 : el.querySelector(".mt-txt"))) == null ? void 0 : _a2.textContent) != null ? _b2 : ""
-    };
-  }).filter((s) => Number.isFinite(s.start));
+    var _a2;
+    return Number((_a2 = asEl(raw)) == null ? void 0 : _a2.dataset.mtStart);
+  }).filter((n) => Number.isFinite(n));
 }
 async function revealInMarkdown(app, file, annotation) {
   const leaf = app.workspace.getLeaf(false);
