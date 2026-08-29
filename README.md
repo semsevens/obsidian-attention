@@ -85,6 +85,18 @@ that; not reconsidering is simpler and never surprises you.
 > whichever acts last wins, and the winner can change from open to open. Pick
 > one.
 
+## On a phone
+
+Everything works, with the gestures a phone has:
+
+- **Select text** and lift your finger — the popover appears once the selection
+  stops changing, which is later than the lift, since iOS lets you drag the
+  handles afterwards.
+- **Press and hold** for the full menu, wherever a right-click would give you
+  one: a passage, a picture, an entry in the panel.
+- The panel's row actions are always visible there rather than waiting for a
+  hover that will never come.
+
 ## Versus `==highlight==`
 
 Obsidian's own highlight is markdown syntax living in the note. That makes it

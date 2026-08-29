@@ -1,6 +1,6 @@
 {
   "name": "obsidian-attention",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "Obsidian plugin: record and revisit your attention",
   "main": "main.js",
   "scripts": {
