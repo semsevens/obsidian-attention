@@ -66,7 +66,10 @@ export class SelectionPopover {
   hide(): void {
     document.removeEventListener('mousedown', this.dismiss);
     document.removeEventListener('keydown', this.dismiss);
-    this.el?.remove();
     this.el = null;
+    // Every one in the document, not only the one this instance remembers.
+    // There are two of these — one per host — and a reloaded plugin leaves its
+    // predecessor's behind, so "hide mine" let them stack up on screen.
+    for (const stale of Array.from(document.querySelectorAll('.at-popover'))) stale.remove();
   }
 }

@@ -1846,11 +1846,11 @@ var SelectionPopover = class {
     }, 0);
   }
   hide() {
-    var _a;
     document.removeEventListener("mousedown", this.dismiss);
     document.removeEventListener("keydown", this.dismiss);
-    (_a = this.el) == null ? void 0 : _a.remove();
     this.el = null;
+    for (const stale of Array.from(document.querySelectorAll(".at-popover")))
+      stale.remove();
   }
 };
 
@@ -1911,11 +1911,11 @@ var CommentBubble = class {
     }, 0);
   }
   hide() {
-    var _a;
     document.removeEventListener("mousedown", this.dismiss);
     document.removeEventListener("keydown", this.dismiss);
-    (_a = this.el) == null ? void 0 : _a.remove();
     this.el = null;
+    for (const stale of Array.from(document.querySelectorAll(".at-bubble")))
+      stale.remove();
   }
 };
 
