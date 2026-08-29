@@ -1109,7 +1109,8 @@ var ReviewView = class extends import_obsidian6.ItemView {
     const left = meta.createDiv("at-meta-left");
     if (this.lens === "all" || this.resurfaced || fromEmbed) {
       const name = (_b = targetPath.split("/").pop()) != null ? _b : targetPath;
-      left.createSpan({ text: name.replace(/\.md$/, ""), cls: "at-source" });
+      const source = left.createSpan({ text: name.replace(/\.md$/, ""), cls: "at-source" });
+      source.setAttribute("title", targetPath);
     }
     if (annotation.anchor.kind === "transcript") {
       left.createSpan({ text: fmtTime(annotation.anchor.start), cls: "at-time" });

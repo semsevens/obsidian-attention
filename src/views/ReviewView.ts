@@ -273,7 +273,12 @@ export class ReviewView extends ItemView {
     // In the per-note outline the filename is noise — it's the same every time.
     if (this.lens === 'all' || this.resurfaced || fromEmbed) {
       const name = targetPath.split('/').pop() ?? targetPath;
-      left.createSpan({ text: name.replace(/\.md$/, ''), cls: 'at-source' });
+      const source = left.createSpan({ text: name.replace(/\.md$/, ''), cls: 'at-source' });
+      // The name is the only thing saying this mark is not from the note on
+      // screen, and it is the first thing the column truncates. Across the
+      // whole vault that reads as a picture that does not match the note it is
+      // sitting beside, so the full path stays available on hover.
+      source.setAttribute('title', targetPath);
     }
     if (annotation.anchor.kind === 'transcript') {
       left.createSpan({ text: fmtTime(annotation.anchor.start), cls: 'at-time' });
