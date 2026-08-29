@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => AttentionPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian12 = require("obsidian");
+var import_obsidian13 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian2 = require("obsidian");
@@ -60,7 +60,18 @@ var DEFAULT_SETTINGS = {
   trackReplays: false,
   autoRevealPanel: true,
   resurfaceCount: 10,
-  keepOrphanedSidecars: true
+  keepOrphanedSidecars: true,
+  // Off by default: deciding how someone's notes open is not this plugin's
+  // business until they ask for it.
+  forceViewMode: false,
+  defaultViewMode: "reading",
+  folderViewModes: []
+};
+var MODE_LABELS = {
+  reading: "Reading",
+  live: "Editing (Live Preview)",
+  source: "Editing (source)",
+  default: "Leave alone (Obsidian's own default)"
 };
 var AttentionSettingTab = class extends import_obsidian2.PluginSettingTab {
   constructor(app, plugin) {
@@ -126,6 +137,55 @@ var AttentionSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
       })
     );
+    new import_obsidian2.Setting(containerEl).setName("How notes open").setHeading();
+    new import_obsidian2.Setting(containerEl).setName("Open notes in reading mode").setDesc(
+      "Marks live in a sidecar, so reading mode costs nothing \u2014 you can highlight and comment without leaving it, and the note stops inviting stray keystrokes. This is not read-only: Ctrl+E still switches to editing, and the mode is only set when a note is opened, so it stays put once you do."
+    ).addToggle(
+      (t) => t.setValue(this.plugin.settings.forceViewMode).onChange(async (v) => {
+        this.plugin.settings.forceViewMode = v;
+        await this.plugin.saveSettings();
+        this.plugin.applyViewModes();
+        this.display();
+      })
+    );
+    if (this.plugin.settings.forceViewMode) {
+      new import_obsidian2.Setting(containerEl).setName("Everything else opens as").setDesc("Used for any note no exception below covers.").addDropdown(
+        (d) => d.addOptions(MODE_LABELS).setValue(this.plugin.settings.defaultViewMode).onChange(async (v) => {
+          this.plugin.settings.defaultViewMode = v;
+          await this.plugin.saveSettings();
+          this.plugin.applyViewModes();
+        })
+      );
+      new import_obsidian2.Setting(containerEl).setName("Exceptions by folder").setDesc(
+        "Folders that open differently \u2014 somewhere you write rather than read. The deepest matching folder wins. A note can always overrule both with obsidianUIMode: preview (or source) in its frontmatter."
+      ).addButton(
+        (b) => b.setButtonText("Add folder").setCta().onClick(async () => {
+          this.plugin.settings.folderViewModes.push({ folder: "", mode: "live" });
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      );
+      this.plugin.settings.folderViewModes.forEach((rule, i) => {
+        new import_obsidian2.Setting(containerEl).setClass("at-folder-rule").addText(
+          (t) => t.setPlaceholder("folder/path").setValue(rule.folder).onChange(async (v) => {
+            rule.folder = v;
+            await this.plugin.saveSettings();
+          })
+        ).addDropdown(
+          (d) => d.addOptions(MODE_LABELS).setValue(rule.mode).onChange(async (v) => {
+            rule.mode = v;
+            await this.plugin.saveSettings();
+            this.plugin.applyViewModes();
+          })
+        ).addExtraButton(
+          (b) => b.setIcon("trash-2").setTooltip("Remove").onClick(async () => {
+            this.plugin.settings.folderViewModes.splice(i, 1);
+            await this.plugin.saveSettings();
+            this.display();
+          })
+        );
+      });
+    }
     new import_obsidian2.Setting(containerEl).setName("Review").setHeading();
     new import_obsidian2.Setting(containerEl).setName("Open the panel for annotated notes").setDesc(
       "Reveal the Attention panel when you open a note that has annotations, and leave it alone otherwise. Focus stays in the note either way."
@@ -2563,13 +2623,158 @@ var TranscriptHost = class {
   }
 };
 
+// src/hosts/markdown/viewModeHost.ts
+var import_obsidian12 = require("obsidian");
+
+// src/viewMode.ts
+var UI_MODE_KEY = "obsidianUIMode";
+var EDITING_MODE_KEY = "obsidianEditingMode";
+var TARGETS = {
+  reading: { mode: "preview", source: false },
+  live: { mode: "source", source: false },
+  source: { mode: "source", source: true }
+};
+function targetFor(pref) {
+  return pref === "default" ? null : TARGETS[pref];
+}
+function resolveViewMode(path, frontmatter, settings) {
+  if (!settings.forceViewMode)
+    return null;
+  const declared = fromFrontmatter(frontmatter);
+  if (declared)
+    return declared;
+  const rule = deepestRule(path, settings.folderViewModes);
+  if (rule)
+    return targetFor(rule.mode);
+  return targetFor(settings.defaultViewMode);
+}
+function fromFrontmatter(fm) {
+  if (!fm)
+    return null;
+  const editing = str(fm[EDITING_MODE_KEY]);
+  const ui = str(fm[UI_MODE_KEY]);
+  if (ui === "preview")
+    return TARGETS.reading;
+  if (ui === "source" || editing) {
+    return editing === "source" ? TARGETS.source : TARGETS.live;
+  }
+  return null;
+}
+function deepestRule(path, rules) {
+  let best = null;
+  for (const rule of rules) {
+    const folder = normalizeFolder(rule.folder);
+    if (folder === null || !covers(folder, path))
+      continue;
+    if (!best || folder.length > normalizeFolder(best.folder).length)
+      best = rule;
+  }
+  return best;
+}
+function normalizeFolder(folder) {
+  const trimmed = folder.trim().replace(/^\/+|\/+$/g, "");
+  return trimmed === "" ? null : trimmed;
+}
+function covers(folder, path) {
+  return path.startsWith(folder + "/");
+}
+function str(value) {
+  return typeof value === "string" && value.trim() !== "" ? value.trim().toLowerCase() : null;
+}
+
+// src/hosts/markdown/viewModeHost.ts
+var ViewModeHost = class {
+  constructor(app, plugin, settings) {
+    this.app = app;
+    this.plugin = plugin;
+    this.settings = settings;
+    /** The path this leaf was last opened *at*, whether or not we changed it. */
+    this.applied = /* @__PURE__ */ new WeakMap();
+  }
+  register() {
+    this.plugin.registerEvent(
+      this.app.workspace.on("file-open", (file) => {
+        if (file)
+          this.apply(file);
+      })
+    );
+  }
+  /**
+   * Re-apply to every open note.
+   *
+   * For turning the feature on, or changing the rules, without having to
+   * reopen anything to see what the change did.
+   */
+  applyToOpenNotes() {
+    this.applied = /* @__PURE__ */ new WeakMap();
+    for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
+      const file = leaf.view instanceof import_obsidian12.MarkdownView ? leaf.view.file : null;
+      if (file)
+        this.apply(file, leaf);
+    }
+  }
+  /**
+   * Obsidian finishes opening the file *after* this handler returns, and the
+   * state it settles on overwrites anything set from inside the event. Waiting
+   * a tick is not enough on its own either — the leaf can still be mid-open —
+   * so the mode is set and then checked, and set again if the open undid it.
+   */
+  apply(file, into) {
+    let attempts = 0;
+    const attempt = () => {
+      var _a;
+      const leaves = into ? [into] : this.leavesShowing(file);
+      for (const leaf of leaves) {
+        if (this.applied.get(leaf) === file.path)
+          continue;
+        const frontmatter = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
+        const target = resolveViewMode(file.path, frontmatter, this.settings);
+        if (!target) {
+          this.applied.set(leaf, file.path);
+          continue;
+        }
+        if (this.matches(leaf, target)) {
+          this.applied.set(leaf, file.path);
+          continue;
+        }
+        void this.setMode(leaf, target);
+      }
+      if (++attempts < 8)
+        window.setTimeout(attempt, 40);
+    };
+    window.setTimeout(attempt, 0);
+  }
+  /** Every leaf showing this note — the same note can be open in two panes. */
+  leavesShowing(file) {
+    return this.app.workspace.getLeavesOfType("markdown").filter((leaf) => {
+      var _a;
+      return leaf.view instanceof import_obsidian12.MarkdownView && ((_a = leaf.view.file) == null ? void 0 : _a.path) === file.path;
+    });
+  }
+  matches(leaf, target) {
+    const state = leaf.getViewState().state;
+    return (state == null ? void 0 : state.mode) === target.mode && (state == null ? void 0 : state.source) === target.source;
+  }
+  /** `setViewState` rebuilds the view, so callers check `matches` first. */
+  async setMode(leaf, target) {
+    const state = leaf.getViewState();
+    const current = state.state;
+    if (!current)
+      return;
+    current.mode = target.mode;
+    current.source = target.source;
+    await leaf.setViewState(state);
+  }
+};
+
 // src/main.ts
-var AttentionPlugin = class extends import_obsidian12.Plugin {
+var AttentionPlugin = class extends import_obsidian13.Plugin {
   constructor() {
     super(...arguments);
     this.markdownHost = null;
     this.transcriptHost = null;
     this.tracker = null;
+    this.viewModes = null;
     /**
      * Show the panel. `focus: false` is used when opening it on the user's behalf
      * — revealing a sidebar is helpful, stealing the cursor mid-sentence is not.
@@ -2585,6 +2790,8 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
     this.applyMarkColor();
     if (this.settings.enableMarkdownHost)
       this.setupMarkdownHost();
+    this.viewModes = new ViewModeHost(this.app, this, this.settings);
+    this.viewModes.register();
     if (this.settings.enableTranscriptHost) {
       this.transcriptHost = new TranscriptHost(this.app, this, this.store, this.settings);
       this.transcriptHost.register();
@@ -2628,6 +2835,11 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
   applyMarkColor() {
     document.body.setCssProps({ "--at-color": this.settings.markColor });
   }
+  /** Re-open every visible note in the mode the current rules ask for. */
+  applyViewModes() {
+    var _a;
+    (_a = this.viewModes) == null ? void 0 : _a.applyToOpenNotes();
+  }
   /**
    * Opening a sidecar opens what it annotates instead.
    *
@@ -2641,8 +2853,8 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
       return false;
     const targetPath = targetPathFor(file.path);
     const target = targetPath && this.app.vault.getAbstractFileByPath(targetPath);
-    if (!(target instanceof import_obsidian12.TFile)) {
-      new import_obsidian12.Notice(
+    if (!(target instanceof import_obsidian13.TFile)) {
+      new import_obsidian13.Notice(
         `Attention: \u201C${targetPath != null ? targetPath : file.name}\u201D no longer exists. Its marks are still here \u2014 delete this file to discard them.`
       );
       return false;
@@ -2675,11 +2887,12 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
   async onLayoutReady() {
     await this.rebuildIndex();
     await this.warmOpenFiles();
+    this.applyViewModes();
   }
   async warmOpenFiles() {
     const paths = /* @__PURE__ */ new Set();
     this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
-      const file = leaf.view instanceof import_obsidian12.MarkdownView ? leaf.view.file : null;
+      const file = leaf.view instanceof import_obsidian13.MarkdownView ? leaf.view.file : null;
       if (file)
         paths.add(file.path);
     });
@@ -2722,7 +2935,7 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
   rerenderReadingViews() {
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (view instanceof import_obsidian12.MarkdownView && view.getMode() === "preview") {
+      if (view instanceof import_obsidian13.MarkdownView && view.getMode() === "preview") {
         view.previewMode.rerender(true);
       }
     }
@@ -2762,7 +2975,7 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
     await leaf.loadIfDeferred();
     await this.app.workspace.revealLeaf(leaf);
     if (!focus) {
-      const editor = this.app.workspace.getActiveViewOfType(import_obsidian12.MarkdownView);
+      const editor = this.app.workspace.getActiveViewOfType(import_obsidian13.MarkdownView);
       if (editor)
         this.app.workspace.setActiveLeaf(editor.leaf, { focus: true });
     }
@@ -2782,10 +2995,10 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
    * is a sibling, so it travels with the folder — only a file's own rename does.
    */
   async handleRename(file, oldPath) {
-    if (!(file instanceof import_obsidian12.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian13.TFile) || isSidecarPath(file.path))
       return;
     const old = this.app.vault.getAbstractFileByPath(sidecarPathFor(oldPath));
-    if (!(old instanceof import_obsidian12.TFile))
+    if (!(old instanceof import_obsidian13.TFile))
       return;
     const nextPath = sidecarPathFor(file.path);
     if (old.path === nextPath)
@@ -2798,17 +3011,17 @@ var AttentionPlugin = class extends import_obsidian12.Plugin {
       this.index.renameFile(oldPath, file.path);
       this.refreshReviewViews();
     } catch (e) {
-      new import_obsidian12.Notice(`Attention: could not move annotations for ${file.name}`);
+      new import_obsidian13.Notice(`Attention: could not move annotations for ${file.name}`);
       console.error(e);
     }
   }
   async handleDelete(file) {
-    if (!(file instanceof import_obsidian12.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian13.TFile) || isSidecarPath(file.path))
       return;
     if (this.settings.keepOrphanedSidecars)
       return;
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
-    if (sidecar instanceof import_obsidian12.TFile)
+    if (sidecar instanceof import_obsidian13.TFile)
       await this.app.fileManager.trashFile(sidecar);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);

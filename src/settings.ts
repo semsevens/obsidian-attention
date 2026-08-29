@@ -1,8 +1,9 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type AttentionPlugin from './main';
 import { formatWhen, TIME_FORMAT_EXAMPLES } from './ui/time';
+import { ViewModePreference, ViewModeSettings } from './viewMode';
 
-export interface AttentionSettings {
+export interface AttentionSettings extends ViewModeSettings {
   /**
    * The one colour marks are drawn in. Per-annotation colours were dropped:
    * choosing between five swatches every time is a decision the act of
@@ -64,6 +65,18 @@ export const DEFAULT_SETTINGS: AttentionSettings = {
   autoRevealPanel: true,
   resurfaceCount: 10,
   keepOrphanedSidecars: true,
+  // Off by default: deciding how someone's notes open is not this plugin's
+  // business until they ask for it.
+  forceViewMode: false,
+  defaultViewMode: 'reading',
+  folderViewModes: [],
+};
+
+const MODE_LABELS: Record<ViewModePreference, string> = {
+  reading: 'Reading',
+  live: 'Editing (Live Preview)',
+  source: 'Editing (source)',
+  default: "Leave alone (Obsidian's own default)",
 };
 
 export class AttentionSettingTab extends PluginSettingTab {
@@ -170,6 +183,87 @@ export class AttentionSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }),
       );
+
+    new Setting(containerEl).setName('How notes open').setHeading();
+
+    new Setting(containerEl)
+      .setName('Open notes in reading mode')
+      .setDesc(
+        'Marks live in a sidecar, so reading mode costs nothing — you can highlight and ' +
+          'comment without leaving it, and the note stops inviting stray keystrokes. ' +
+          'This is not read-only: Ctrl+E still switches to editing, and the mode is only ' +
+          'set when a note is opened, so it stays put once you do.',
+      )
+      .addToggle(t =>
+        t.setValue(this.plugin.settings.forceViewMode).onChange(async v => {
+          this.plugin.settings.forceViewMode = v;
+          await this.plugin.saveSettings();
+          this.plugin.applyViewModes();
+          this.display();
+        }),
+      );
+
+    if (this.plugin.settings.forceViewMode) {
+      new Setting(containerEl)
+        .setName('Everything else opens as')
+        .setDesc('Used for any note no exception below covers.')
+        .addDropdown(d =>
+          d
+            .addOptions(MODE_LABELS)
+            .setValue(this.plugin.settings.defaultViewMode)
+            .onChange(async v => {
+              this.plugin.settings.defaultViewMode = v as ViewModePreference;
+              await this.plugin.saveSettings();
+              this.plugin.applyViewModes();
+            }),
+        );
+
+      new Setting(containerEl)
+        .setName('Exceptions by folder')
+        .setDesc(
+          'Folders that open differently — somewhere you write rather than read. ' +
+            'The deepest matching folder wins. A note can always overrule both with ' +
+            'obsidianUIMode: preview (or source) in its frontmatter.',
+        )
+        .addButton(b =>
+          b.setButtonText('Add folder').setCta().onClick(async () => {
+            this.plugin.settings.folderViewModes.push({ folder: '', mode: 'live' });
+            await this.plugin.saveSettings();
+            this.display();
+          }),
+        );
+
+      this.plugin.settings.folderViewModes.forEach((rule, i) => {
+        new Setting(containerEl)
+          .setClass('at-folder-rule')
+          .addText(t =>
+            t
+              .setPlaceholder('folder/path')
+              .setValue(rule.folder)
+              .onChange(async v => {
+                rule.folder = v;
+                await this.plugin.saveSettings();
+              }),
+          )
+          .addDropdown(d =>
+            d
+              .addOptions(MODE_LABELS)
+              .setValue(rule.mode)
+              .onChange(async v => {
+                rule.mode = v as ViewModePreference;
+                await this.plugin.saveSettings();
+                this.plugin.applyViewModes();
+              }),
+          )
+          .addExtraButton(b =>
+            b.setIcon('trash-2').setTooltip('Remove').onClick(async () => {
+              this.plugin.settings.folderViewModes.splice(i, 1);
+              await this.plugin.saveSettings();
+              this.display();
+            }),
+          );
+      });
+    }
 
     new Setting(containerEl).setName('Review').setHeading();
 

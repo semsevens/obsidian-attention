@@ -17,9 +17,9 @@ import { asEl } from '../../dom';
  * looked for here — otherwise a mark covering `**bold**` would search the
  * rendered DOM for asterisks that were never drawn.
  *
- * Known limit: a quote straddling inline markup lands in two separate text
- * nodes, and only the run containing the whole stripped quote gets painted.
- * Live Preview, which works against the real document, shows it fully.
+ * A quote straddling inline markup lands in several text nodes once rendered,
+ * which `paintQuote` handles: it flattens the run and wraps back to front, so
+ * `with **bold** here` comes out painted as three pieces rather than one.
  */
 /**
  * Paint the reading views that are already on screen.

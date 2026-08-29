@@ -1,7 +1,7 @@
 {
 	"id": "attention",
 	"name": "Attention",
-	"version": "0.1.4",
+	"version": "0.2.0",
 	"minAppVersion": "1.7.2",
 	"description": "Record where your attention went \u2014 highlights and comments on notes, transcripts and subtitles \u2014 then revisit them. Never modifies the original file.",
 	"author": "semsevens",

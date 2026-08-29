@@ -53,6 +53,38 @@ appears only once a passage has caught you more than once. Clicking an entry jum
 own when you open a note that has annotations, and stays out of the way when you
 open one that doesn't.
 
+## Opening notes in reading mode
+
+Off by default; turn it on under **How notes open**.
+
+Marks live beside the note rather than in it, so reading mode costs nothing
+here — you can highlight and comment without ever leaving it. That makes it the
+natural way to hold material you collected in order to read it: the note stops
+inviting stray keystrokes, and nothing you do to it can be a typo.
+
+It is *not* read-only. Obsidian has no such thing, and this doesn't invent one:
+Ctrl+E still switches to editing, and the file stays writable.
+
+- **Everything else opens as** — the vault-wide default.
+- **Exceptions by folder** — somewhere you write rather than read. The deepest
+  matching folder wins, so `raw` can be reading while `raw/drafts` is not.
+- **Frontmatter** overrules both, using the same keys as the *Force note view
+  mode* plugin, so notes already carrying them keep working:
+
+  ```yaml
+  obsidianUIMode: preview     # or: source
+  obsidianEditingMode: live   # or: source
+  ```
+
+The mode is chosen when a note is opened, and only then. Press Ctrl+E to fix a
+typo, glance at another tab, come back — you are still editing. Plugins that
+force the mode on every activation need an "ignore open files" switch to escape
+that; not reconsidering is simpler and never surprises you.
+
+> Running a separate view-mode plugin alongside this will make them fight —
+> whichever acts last wins, and the winner can change from open to open. Pick
+> one.
+
 ## Versus `==highlight==`
 
 Obsidian's own highlight is markdown syntax living in the note. That makes it

@@ -22,6 +22,7 @@ import {
 import { AnchorTracker } from './anchor/AnchorTracker';
 import { readingModeHighlighter, repaintReadingViews } from './hosts/markdown/readingMode';
 import { TranscriptHost } from './hosts/transcript/TranscriptHost';
+import { ViewModeHost } from './hosts/markdown/viewModeHost';
 
 export default class AttentionPlugin extends Plugin {
   settings!: AttentionSettings;
@@ -30,6 +31,7 @@ export default class AttentionPlugin extends Plugin {
   private markdownHost: MarkdownHost | null = null;
   private transcriptHost: TranscriptHost | null = null;
   private tracker: AnchorTracker | null = null;
+  private viewModes: ViewModeHost | null = null;
 
   async onload() {
     await this.loadSettings();
@@ -43,6 +45,11 @@ export default class AttentionPlugin extends Plugin {
     this.applyMarkColor();
 
     if (this.settings.enableMarkdownHost) this.setupMarkdownHost();
+
+    // Registered whether or not the feature is on, so flipping the setting
+    // takes effect without a reload; the setting is read per note.
+    this.viewModes = new ViewModeHost(this.app, this, this.settings);
+    this.viewModes.register();
 
     if (this.settings.enableTranscriptHost) {
       // Dormant unless obsidian-media-transcript is installed and announcing.
@@ -98,6 +105,11 @@ export default class AttentionPlugin extends Plugin {
     document.body.setCssProps({ '--at-color': this.settings.markColor });
   }
 
+  /** Re-open every visible note in the mode the current rules ask for. */
+  applyViewModes(): void {
+    this.viewModes?.applyToOpenNotes();
+  }
+
   /**
    * Opening a sidecar opens what it annotates instead.
    *
@@ -148,8 +160,10 @@ export default class AttentionPlugin extends Plugin {
     await this.rebuildIndex();
     // Notes open at load time never fire `file-open`, so without this their
     // highlights stay unpainted until you switch away and back — which is
-    // exactly what happens on every hot reload.
+    // exactly what happens on every hot reload. The same gap applies to the
+    // mode they opened in.
     await this.warmOpenFiles();
+    this.applyViewModes();
   }
 
   private async warmOpenFiles(): Promise<void> {

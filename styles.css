@@ -437,3 +437,19 @@ body.at-style-background .at-hl:hover {
 .at-review {
   overflow-x: hidden;
 }
+
+/* A folder rule is two inputs and a delete, not a named setting — the name
+   column would be empty on every row. */
+.at-folder-rule {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.at-folder-rule .setting-item-info {
+  display: none;
+}
+
+.at-folder-rule .setting-item-control input[type='text'] {
+  flex: 1;
+  min-width: 0;
+}
