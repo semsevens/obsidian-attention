@@ -13,6 +13,7 @@ export interface App {
   vault: {
     getAbstractFileByPath(path: string): TFile | null;
     read(file: TFile): Promise<string>;
+    cachedRead(file: TFile): Promise<string>;
     modify(file: TFile, data: string): Promise<void>;
     create(path: string, data: string): Promise<TFile>;
     getFiles(): TFile[];

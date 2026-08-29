@@ -13,6 +13,7 @@ import { AttentionSettings } from '../../settings';
 import { asEl, asImg, elementOf } from '../../dom';
 import { belongsTo, ownerOf } from './ownerView';
 import { snapRange } from '../../anchor/snapRange';
+import { WrongNoteError } from '../../store/annotationStore';
 
 /**
  * Turns a selection in a markdown note into an annotation, via the right-click
@@ -549,8 +550,13 @@ export class MarkdownHost {
   }
 
   private async mark(file: TFile, anchor: MarkdownAnchor, body: string | null): Promise<void> {
-    const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
-    if (repeat) new Notice(`Marked ${annotation.hits.length}× now`);
+    try {
+      const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
+      if (repeat) new Notice(`Marked ${annotation.hits.length}× now`);
+    } catch (e) {
+      if (!(e instanceof WrongNoteError)) throw e;
+      new Notice('Attention: that passage is not in this note — nothing was saved.');
+    }
   }
 }
 

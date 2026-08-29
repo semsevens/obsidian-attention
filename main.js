@@ -1290,6 +1290,13 @@ function repairAnchor(source, anchor) {
 }
 
 // src/store/annotationStore.ts
+var WrongNoteError = class extends Error {
+  constructor(targetPath) {
+    super(`Attention: that passage is not in ${targetPath}, so the mark was not saved.`);
+    this.targetPath = targetPath;
+    this.name = "WrongNoteError";
+  }
+};
 var AnnotationStore = class {
   constructor(app, index) {
     this.app = app;
@@ -1346,6 +1353,7 @@ var AnnotationStore = class {
    * the caller can say so.
    */
   async mark(targetPath, anchor, body) {
+    await this.assertBelongs(targetPath, anchor);
     const data = await this.get(targetPath);
     const now = new Date().toISOString();
     const existing = data.annotations.find((a) => sameSpot(a.anchor, anchor));
@@ -1412,6 +1420,37 @@ ${body}` : body;
   /** Drop a cache entry (after an external edit or a rename). */
   forget(targetPath) {
     this.cache.delete(targetPath);
+  }
+  /**
+   * Refuse to file a mark under a note that does not contain it.
+   *
+   * A markdown quote is cut out of a file's own source, so if it cannot be
+   * found there again the mark is being filed against the wrong note — and a
+   * mark in the wrong note is not a lesser mark, it is a lost one: it can
+   * never resolve, so it shows up as lost in a file it was never about, while
+   * the passage it was made on has nothing on it.
+   *
+   * The ways this has happened were all the same mistake in different clothes
+   * — the note that was clicked in and the note that was active being taken
+   * for the same thing. Each was fixed where it was found, but the fixes are
+   * one per path and this is the invariant they were all trying to keep, so it
+   * is checked here as well, where every path has to come through.
+   */
+  async assertBelongs(targetPath, anchor) {
+    if (anchor.kind !== "markdown")
+      return;
+    const file = this.app.vault.getAbstractFileByPath(targetPath);
+    if (!(file instanceof import_obsidian8.TFile))
+      return;
+    let source;
+    try {
+      source = await this.app.vault.cachedRead(file);
+    } catch (e) {
+      return;
+    }
+    if (source.includes(anchor.quote))
+      return;
+    throw new WrongNoteError(targetPath);
   }
   async commit(targetPath, data) {
     await saveSidecar(this.app, data);
@@ -2062,9 +2101,15 @@ var MarkdownHost = class {
     }).open();
   }
   async mark(file, anchor, body) {
-    const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
-    if (repeat)
-      new import_obsidian9.Notice(`Marked ${annotation.hits.length}\xD7 now`);
+    try {
+      const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
+      if (repeat)
+        new import_obsidian9.Notice(`Marked ${annotation.hits.length}\xD7 now`);
+    } catch (e) {
+      if (!(e instanceof WrongNoteError))
+        throw e;
+      new import_obsidian9.Notice("Attention: that passage is not in this note \u2014 nothing was saved.");
+    }
   }
 };
 

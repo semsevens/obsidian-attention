@@ -6,6 +6,14 @@ import { repairAnchor } from '../anchor/repairAnchors';
 
 type Listener = (targetPath: string) => void;
 
+/** Thrown when a mark would be filed under a note that does not contain it. */
+export class WrongNoteError extends Error {
+  constructor(readonly targetPath: string) {
+    super(`Attention: that passage is not in ${targetPath}, so the mark was not saved.`);
+    this.name = 'WrongNoteError';
+  }
+}
+
 /**
  * The one place annotations are read and written.
  *
@@ -81,6 +89,7 @@ export class AnnotationStore {
     anchor: Anchor,
     body: string | null,
   ): Promise<{ annotation: Annotation; repeat: boolean }> {
+    await this.assertBelongs(targetPath, anchor);
     const data = await this.get(targetPath);
     const now = new Date().toISOString();
 
@@ -153,6 +162,37 @@ export class AnnotationStore {
   /** Drop a cache entry (after an external edit or a rename). */
   forget(targetPath: string): void {
     this.cache.delete(targetPath);
+  }
+
+  /**
+   * Refuse to file a mark under a note that does not contain it.
+   *
+   * A markdown quote is cut out of a file's own source, so if it cannot be
+   * found there again the mark is being filed against the wrong note — and a
+   * mark in the wrong note is not a lesser mark, it is a lost one: it can
+   * never resolve, so it shows up as lost in a file it was never about, while
+   * the passage it was made on has nothing on it.
+   *
+   * The ways this has happened were all the same mistake in different clothes
+   * — the note that was clicked in and the note that was active being taken
+   * for the same thing. Each was fixed where it was found, but the fixes are
+   * one per path and this is the invariant they were all trying to keep, so it
+   * is checked here as well, where every path has to come through.
+   */
+  private async assertBelongs(targetPath: string, anchor: Anchor): Promise<void> {
+    if (anchor.kind !== 'markdown') return;
+    const file = this.app.vault.getAbstractFileByPath(targetPath);
+    if (!(file instanceof TFile)) return;
+
+    let source: string;
+    try {
+      source = await this.app.vault.cachedRead(file);
+    } catch {
+      return; // Unreadable is not the same as wrong.
+    }
+    if (source.includes(anchor.quote)) return;
+
+    throw new WrongNoteError(targetPath);
   }
 
   private async commit(targetPath: string, data: AnnotationFile): Promise<void> {

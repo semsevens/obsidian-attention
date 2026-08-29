@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { AnnotationStore } from '../src/store/annotationStore';
+import { AnnotationStore, WrongNoteError } from '../src/store/annotationStore';
 import { AttentionIndex } from '../src/store/attentionIndex';
 import { Annotation } from '../src/model';
 import { TFile, type App } from '../tests/stubs/obsidian';
@@ -20,6 +20,7 @@ function makeApp(files: Map<string, string>): App {
     vault: {
       getAbstractFileByPath: (path: string) => (files.has(path) ? new TFile(path) : null),
       read: async (file: TFile) => files.get(file.path) ?? '',
+      cachedRead: async (file: TFile) => files.get(file.path) ?? '',
       modify: async (file: TFile, data: string) => { files.set(file.path, data); },
       create: async (path: string, data: string) => {
         files.set(path, data);
@@ -109,5 +110,50 @@ describe('AnnotationStore writes', () => {
     await store.remove('a.md', 'one');
 
     expect(files.get('a.md')).toBe('# the original');
+  });
+});
+
+// Every cross-note misfiling found so far had the same signature: a quote cut
+// from one note, filed under another. The store refuses it outright, so a path
+// nobody has audited yet cannot quietly produce one.
+describe('a mark that does not belong to the note', () => {
+  it('is refused rather than saved', async () => {
+    const files = new Map<string, string>([
+      ['a.md', 'the words of note A\n'],
+      ['b.md', 'entirely different words\n'],
+    ]);
+    const app = makeApp(files);
+    const store = new AnnotationStore(app as never, new AttentionIndex(app as never));
+
+    await expect(
+      store.mark('b.md', { kind: 'markdown', quote: 'words of note A', prefix: '', suffix: '', from: 4, to: 19 }, null),
+    ).rejects.toThrow(WrongNoteError);
+    expect(files.has('b.md.anno.json')).toBe(false);
+  });
+
+  it('accepts the same quote under the note it came from', async () => {
+    const files = new Map<string, string>([['a.md', 'the words of note A\n']]);
+    const app = makeApp(files);
+    const store = new AnnotationStore(app as never, new AttentionIndex(app as never));
+
+    const { annotation } = await store.mark(
+      'a.md',
+      { kind: 'markdown', quote: 'words of note A', prefix: '', suffix: '', from: 4, to: 19 },
+      null,
+    );
+    expect(annotation.anchor.quote).toBe('words of note A');
+  });
+
+  it('lets a transcript mark through, having no text to check it against', async () => {
+    const files = new Map<string, string>([['talk.m4a', '']]);
+    const app = makeApp(files);
+    const store = new AnnotationStore(app as never, new AttentionIndex(app as never));
+
+    const { annotation } = await store.mark(
+      'talk.m4a',
+      { kind: 'transcript', quote: 'said aloud', seg: 3, charStart: 0, charEnd: 10, start: 1.5 },
+      null,
+    );
+    expect(annotation.anchor.kind).toBe('transcript');
   });
 });

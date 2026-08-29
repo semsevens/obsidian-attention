@@ -10,6 +10,7 @@ function makeApp(files: Map<string, string>): App {
     vault: {
       getAbstractFileByPath: (p: string) => (files.has(p) ? new TFile(p) : null),
       read: async (f: TFile) => files.get(f.path) ?? '',
+      cachedRead: async (f: TFile) => files.get(f.path) ?? '',
       modify: async (f: TFile, d: string) => { files.set(f.path, d); },
       create: async (p: string, d: string) => { files.set(p, d); return new TFile(p); },
       getFiles: () => [...files.keys()].map(p => new TFile(p)),
