@@ -867,7 +867,7 @@ async function revealInTranscript(app, file, annotation) {
     media.addEventListener("loadedmetadata", seek, { once: true });
   playUntilEndOfSegment(media, starts, at, media.duration);
   void media.play();
-  await flashWhenPainted(document.body, annotation.id);
+  await flashWhenPainted(document.body, annotation.id, ".mt-transcript");
 }
 function nonEmpty(items) {
   return items.length > 0 ? items : null;
@@ -935,10 +935,10 @@ async function revealInMarkdown(app, file, annotation) {
     const to = editor.offsetToPos(at.to);
     editor.setSelection(from, to);
     editor.scrollIntoView({ from, to }, true);
-    await flashWhenPainted(view.contentEl, annotation.id);
+    await flashWhenPainted(view.contentEl, annotation.id, ".cm-content");
     return;
   }
-  await flashWhenPainted(view.contentEl, annotation.id);
+  await flashWhenPainted(view.contentEl, annotation.id, ".markdown-preview-view");
 }
 async function lineOfMark(app, file, annotation) {
   if (annotation.anchor.kind !== "markdown")
@@ -951,12 +951,13 @@ async function lineOfMark(app, file, annotation) {
     return null;
   }
 }
-async function flashWhenPainted(root, id, tries = 20) {
+async function flashWhenPainted(root, id, layer, tries = 20) {
   for (let i = 0; i < tries; i++) {
-    const el = asEl(root.querySelector(`.at-hl[data-at-id="${id}"]`));
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      flash(el);
+    const marks = Array.from(root.querySelectorAll(`${layer} [data-at-id="${id}"]`)).map(asEl).filter((el) => el !== null);
+    if (marks.length > 0) {
+      marks[0].scrollIntoView({ behavior: "smooth", block: "center" });
+      for (const el of marks)
+        flash(el);
       return;
     }
     await new Promise((r) => window.setTimeout(r, 50));

@@ -47,7 +47,7 @@ async function revealInTranscript(app: App, file: TFile, annotation: Annotation)
   playUntilEndOfSegment(media, starts, at, media.duration);
   void media.play();
 
-  await flashWhenPainted(document.body, annotation.id);
+  await flashWhenPainted(document.body, annotation.id, '.mt-transcript');
 }
 
 function nonEmpty<T>(items: T[]): T[] | null {
@@ -162,14 +162,14 @@ async function revealInMarkdown(
     // The selection is the feedback here, but a mark should announce itself the
     // same way wherever it is found — otherwise whether a jump "flashes"
     // depends on which mode the note happened to be in.
-    await flashWhenPainted(view.contentEl, annotation.id);
+    await flashWhenPainted(view.contentEl, annotation.id, '.cm-content');
     return;
   }
 
   // Reading mode renders lazily, so the mark's paragraph may not be in the
   // document at all — there is no painted span to wait for until the scroll
   // above has made Obsidian render that part of the note.
-  await flashWhenPainted(view.contentEl, annotation.id);
+  await flashWhenPainted(view.contentEl, annotation.id, '.markdown-preview-view');
 }
 
 /** The line the mark sits on now, or null if it cannot be placed. */
@@ -191,12 +191,38 @@ async function lineOfMark(app: App, file: TFile, annotation: Annotation): Promis
  * poll briefly and give up quietly if the annotation turns out to be orphaned
  * (in which case nothing was painted and there is nothing to scroll to).
  */
-async function flashWhenPainted(root: HTMLElement, id: string, tries = 20): Promise<void> {
+/**
+ * Wait for the mark to be drawn in the layer the reader is looking at, then
+ * flash it.
+ *
+ * The layer has to be named. A note open in reading mode still has the
+ * editor's copy of it underneath, hidden, and in document order the hidden one
+ * comes first — so "the mark with this id" flashed something invisible
+ * whenever both layers had drawn it, which is whenever the note is short
+ * enough for the editor to have got that far. Longer notes flashed correctly,
+ * and the flash looked as though it came and went at random.
+ *
+ * Asking which is visible is no good either: an unfocused window has laid
+ * nothing out, and every answer is "no".
+ */
+async function flashWhenPainted(
+  root: HTMLElement,
+  id: string,
+  layer: string,
+  tries = 20,
+): Promise<void> {
   for (let i = 0; i < tries; i++) {
-    const el = asEl(root.querySelector(`.at-hl[data-at-id="${id}"]`));
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      flash(el);
+    // Anything carrying the id, not only text spans: a marked picture is an
+    // `<img>` with the same attribute, and looking for `.at-hl` meant image
+    // marks never flashed at all.
+    const marks = Array.from(root.querySelectorAll(`${layer} [data-at-id="${id}"]`))
+      .map(asEl)
+      .filter((el): el is HTMLElement => el !== null);
+    if (marks.length > 0) {
+      marks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // All of them: a mark across four paragraphs is four spans, and flashing
+      // one of the four says less than it should.
+      for (const el of marks) flash(el);
       return;
     }
     await new Promise(r => window.setTimeout(r, 50));

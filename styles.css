@@ -481,3 +481,17 @@ body.at-style-background .at-hl:hover {
   height: 34px;
   min-width: 34px;
 }
+
+/* A picture is ringed rather than underlined, so the flash needs to sit
+   outside it — on a span the box-shadow overlaps the text and reads fine, but
+   on an image it would be hidden behind the picture itself. */
+img.at-flash {
+  outline: 3px solid var(--text-accent);
+  outline-offset: 2px;
+  animation: at-flash-outline 1.2s ease-out;
+}
+
+@keyframes at-flash-outline {
+  from { outline-color: var(--text-accent); }
+  to   { outline-color: transparent; }
+}
