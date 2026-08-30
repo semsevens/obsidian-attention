@@ -922,8 +922,9 @@ function segmentStarts(owner) {
   }).filter((n) => Number.isFinite(n));
 }
 async function revealInMarkdown(app, file, annotation) {
+  const line = await lineOfMark(app, file, annotation);
   const leaf = app.workspace.getLeaf(false);
-  await leaf.openFile(file);
+  await leaf.openFile(file, line === null ? void 0 : { eState: { line } });
   const view = leaf.view;
   if (!(view instanceof import_obsidian4.MarkdownView))
     return;
@@ -940,13 +941,18 @@ async function revealInMarkdown(app, file, annotation) {
     editor.scrollIntoView({ from, to }, true);
     return;
   }
-  if (annotation.anchor.kind === "markdown") {
+  await flashWhenPainted(view, annotation.id);
+}
+async function lineOfMark(app, file, annotation) {
+  if (annotation.anchor.kind !== "markdown")
+    return null;
+  try {
     const source = await app.vault.cachedRead(file);
     const at = resolveMarkdown(source, annotation.anchor);
-    if (at)
-      view.previewMode.applyScroll(lineOf(lineStarts(source), at.from));
+    return at ? lineOf(lineStarts(source), at.from) : null;
+  } catch (e) {
+    return null;
   }
-  await flashWhenPainted(view, annotation.id);
 }
 async function flashWhenPainted(view, id, tries = 20) {
   for (let i = 0; i < tries; i++) {

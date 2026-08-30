@@ -136,8 +136,15 @@ async function revealInMarkdown(
   file: TFile,
   annotation: Annotation,
 ): Promise<void> {
+  // Work out where to land *before* opening, and let Obsidian do the scrolling
+  // as part of the open. Scrolling afterwards is too late: the view restores
+  // its own position while it sets itself up, and overwrites ours. That is why
+  // jumping to a mark took two clicks — the first opened the note, and only
+  // the second, with the view already settled, could move it.
+  const line = await lineOfMark(app, file, annotation);
+
   const leaf = app.workspace.getLeaf(false);
-  await leaf.openFile(file);
+  await leaf.openFile(file, line === null ? undefined : { eState: { line } });
 
   const view = leaf.view;
   if (!(view instanceof MarkdownView)) return;
@@ -155,15 +162,21 @@ async function revealInMarkdown(
   }
 
   // Reading mode renders lazily, so the mark's paragraph may not be in the
-  // document at all — and then there is no painted span to scroll to, however
-  // long you wait for one. Scroll by source line instead, which makes Obsidian
-  // render that part of the note; the span appears as a result, not before.
-  if (annotation.anchor.kind === 'markdown') {
+  // document at all — there is no painted span to wait for until the scroll
+  // above has made Obsidian render that part of the note.
+  await flashWhenPainted(view, annotation.id);
+}
+
+/** The line the mark sits on now, or null if it cannot be placed. */
+async function lineOfMark(app: App, file: TFile, annotation: Annotation): Promise<number | null> {
+  if (annotation.anchor.kind !== 'markdown') return null;
+  try {
     const source = await app.vault.cachedRead(file);
     const at = resolveMarkdown(source, annotation.anchor);
-    if (at) view.previewMode.applyScroll(lineOf(lineStarts(source), at.from));
+    return at ? lineOf(lineStarts(source), at.from) : null;
+  } catch {
+    return null;
   }
-  await flashWhenPainted(view, annotation.id);
 }
 
 /**
