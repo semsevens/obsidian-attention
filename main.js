@@ -867,11 +867,7 @@ async function revealInTranscript(app, file, annotation) {
     media.addEventListener("loadedmetadata", seek, { once: true });
   playUntilEndOfSegment(media, starts, at, media.duration);
   void media.play();
-  const painted = asEl(document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`));
-  if (painted) {
-    painted.scrollIntoView({ behavior: "smooth", block: "center" });
-    flash(painted);
-  }
+  await flashWhenPainted(document.body, annotation.id);
 }
 function nonEmpty(items) {
   return items.length > 0 ? items : null;
@@ -939,9 +935,10 @@ async function revealInMarkdown(app, file, annotation) {
     const to = editor.offsetToPos(at.to);
     editor.setSelection(from, to);
     editor.scrollIntoView({ from, to }, true);
+    await flashWhenPainted(view.contentEl, annotation.id);
     return;
   }
-  await flashWhenPainted(view, annotation.id);
+  await flashWhenPainted(view.contentEl, annotation.id);
 }
 async function lineOfMark(app, file, annotation) {
   if (annotation.anchor.kind !== "markdown")
@@ -954,9 +951,9 @@ async function lineOfMark(app, file, annotation) {
     return null;
   }
 }
-async function flashWhenPainted(view, id, tries = 20) {
+async function flashWhenPainted(root, id, tries = 20) {
   for (let i = 0; i < tries; i++) {
-    const el = asEl(view.contentEl.querySelector(`.at-hl[data-at-id="${id}"]`));
+    const el = asEl(root.querySelector(`.at-hl[data-at-id="${id}"]`));
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       flash(el);

@@ -47,11 +47,7 @@ async function revealInTranscript(app: App, file: TFile, annotation: Annotation)
   playUntilEndOfSegment(media, starts, at, media.duration);
   void media.play();
 
-  const painted = asEl(document.querySelector(`.at-hl[data-at-id="${annotation.id}"]`));
-  if (painted) {
-    painted.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    flash(painted);
-  }
+  await flashWhenPainted(document.body, annotation.id);
 }
 
 function nonEmpty<T>(items: T[]): T[] | null {
@@ -163,13 +159,17 @@ async function revealInMarkdown(
     const to = editor.offsetToPos(at.to);
     editor.setSelection(from, to);
     editor.scrollIntoView({ from, to }, true);
+    // The selection is the feedback here, but a mark should announce itself the
+    // same way wherever it is found — otherwise whether a jump "flashes"
+    // depends on which mode the note happened to be in.
+    await flashWhenPainted(view.contentEl, annotation.id);
     return;
   }
 
   // Reading mode renders lazily, so the mark's paragraph may not be in the
   // document at all — there is no painted span to wait for until the scroll
   // above has made Obsidian render that part of the note.
-  await flashWhenPainted(view, annotation.id);
+  await flashWhenPainted(view.contentEl, annotation.id);
 }
 
 /** The line the mark sits on now, or null if it cannot be placed. */
@@ -191,9 +191,9 @@ async function lineOfMark(app: App, file: TFile, annotation: Annotation): Promis
  * poll briefly and give up quietly if the annotation turns out to be orphaned
  * (in which case nothing was painted and there is nothing to scroll to).
  */
-async function flashWhenPainted(view: MarkdownView, id: string, tries = 20): Promise<void> {
+async function flashWhenPainted(root: HTMLElement, id: string, tries = 20): Promise<void> {
   for (let i = 0; i < tries; i++) {
-    const el = asEl(view.contentEl.querySelector(`.at-hl[data-at-id="${id}"]`));
+    const el = asEl(root.querySelector(`.at-hl[data-at-id="${id}"]`));
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       flash(el);
