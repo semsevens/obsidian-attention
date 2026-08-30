@@ -924,7 +924,7 @@ function segmentStarts(owner) {
 async function revealInMarkdown(app, file, annotation) {
   const line = await lineOfMark(app, file, annotation);
   const leaf = app.workspace.getLeaf(false);
-  await leaf.openFile(file, line === null ? void 0 : { eState: { line } });
+  await leaf.openFile(file, line === null ? void 0 : { eState: { scroll: line } });
   const view = leaf.view;
   if (!(view instanceof import_obsidian4.MarkdownView))
     return;

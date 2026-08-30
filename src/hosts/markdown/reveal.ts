@@ -144,7 +144,12 @@ async function revealInMarkdown(
   const line = await lineOfMark(app, file, annotation);
 
   const leaf = app.workspace.getLeaf(false);
-  await leaf.openFile(file, line === null ? undefined : { eState: { line } });
+  // `scroll`, not `line`: both take the view to that line, but `line` also
+  // flashes the whole block yellow — Obsidian's way of saying "here is what you
+  // followed a link to". Next to a mark on three words, a highlight over the
+  // entire paragraph reads as the mark itself, and the mark already flashes on
+  // its own once it is painted.
+  await leaf.openFile(file, line === null ? undefined : { eState: { scroll: line } });
 
   const view = leaf.view;
   if (!(view instanceof MarkdownView)) return;
