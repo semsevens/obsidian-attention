@@ -2152,6 +2152,123 @@ function sourceRangeOf(source, el) {
   return rangeOfLines(source, lineStarts(source), lines.start, lines.end);
 }
 
+// src/anchor/align.ts
+var MAX_EDITS = 2e3;
+function align(rendered, source) {
+  const plain = project(source);
+  const pairs = diffPairs(rendered, plain.text);
+  if (!pairs)
+    return null;
+  if (pairs.filter((j) => j >= 0).length * 2 < rendered.length)
+    return null;
+  const toSource2 = (j) => plain.map[j];
+  return {
+    start(at) {
+      for (let i = Math.max(0, at); i < rendered.length; i++) {
+        if (pairs[i] >= 0)
+          return toSource2(pairs[i]);
+      }
+      return source.length;
+    },
+    end(at) {
+      for (let i = Math.min(at, rendered.length) - 1; i >= 0; i--) {
+        if (pairs[i] >= 0)
+          return toSource2(pairs[i]) + 1;
+      }
+      return 0;
+    }
+  };
+}
+function diffPairs(a, b) {
+  const n = a.length;
+  const m = b.length;
+  const pairs = new Int32Array(n).fill(-1);
+  const max = Math.min(n + m, MAX_EDITS);
+  const offset = max + 1;
+  const v = new Int32Array(2 * max + 3);
+  const trace = [];
+  for (let d = 0; d <= max; d++) {
+    trace.push(v.slice(offset - d - 1, offset + d + 2));
+    for (let k = -d; k <= d; k += 2) {
+      let x = k === -d || k !== d && v[offset + k - 1] < v[offset + k + 1] ? v[offset + k + 1] : v[offset + k - 1] + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) {
+        x++;
+        y++;
+      }
+      v[offset + k] = x;
+      if (x >= n && y >= m) {
+        backtrack(trace, n, m, pairs);
+        return pairs;
+      }
+    }
+  }
+  return null;
+}
+function backtrack(trace, n, m, pairs) {
+  let x = n;
+  let y = m;
+  for (let d = trace.length - 1; d >= 0; d--) {
+    const at = (k2) => trace[d][k2 + d + 1];
+    const k = x - y;
+    const prevK = k === -d || k !== d && at(k - 1) < at(k + 1) ? k + 1 : k - 1;
+    const prevX = at(prevK);
+    const prevY = prevX - prevK;
+    while (x > prevX && y > prevY) {
+      x--;
+      y--;
+      pairs[x] = y;
+    }
+    x = prevX;
+    y = prevY;
+  }
+}
+
+// src/hosts/markdown/placeSelection.ts
+function placeByLines(source, range) {
+  const blocks = blocksIn(range);
+  if (blocks.length === 0)
+    return null;
+  const from = edgeOffset(source, blocks[0], range, "start");
+  const to = edgeOffset(source, blocks[blocks.length - 1], range, "end");
+  return from !== null && to !== null && to > from ? { from, to } : null;
+}
+function blocksIn(range) {
+  var _a, _b, _c;
+  const start = blockAround(range.startContainer);
+  const common = range.commonAncestorContainer;
+  const root = (_c = (_b = start == null ? void 0 : start.closest(".markdown-embed-content, .markdown-preview-view")) != null ? _b : (_a = common.nodeType === 1 ? common : common.parentElement) == null ? void 0 : _a.closest(".markdown-preview-view")) != null ? _c : null;
+  if (!root)
+    return start ? [start] : [];
+  const scope = (el) => {
+    var _a2, _b2;
+    return (_b2 = (_a2 = el.parentElement) == null ? void 0 : _a2.closest(".markdown-embed-content")) != null ? _b2 : null;
+  };
+  const home = start ? scope(start) : null;
+  return Array.from(root.querySelectorAll(`[${LINES_ATTR}]`)).filter(
+    (el) => range.intersectsNode(el) && (start === null || scope(el) === home)
+  );
+}
+function edgeOffset(source, block, range, edge) {
+  var _a;
+  const lines = sourceRangeOf(source, block);
+  if (!lines)
+    return null;
+  const alignment = align((_a = block.textContent) != null ? _a : "", source.slice(lines.from, lines.to));
+  if (!alignment)
+    return null;
+  const node = edge === "start" ? range.startContainer : range.endContainer;
+  const offset = edge === "start" ? range.startOffset : range.endOffset;
+  const before = block.ownerDocument.createRange();
+  before.setStart(block, 0);
+  if (block.contains(node))
+    before.setEnd(node, offset);
+  else if (edge === "end")
+    before.setEnd(block, block.childNodes.length);
+  const at = before.toString().length;
+  return lines.from + (edge === "start" ? alignment.start(at) : alignment.end(at));
+}
+
 // src/hosts/markdown/MarkdownHost.ts
 var MarkdownHost = class {
   constructor(app, plugin, store, settings) {
@@ -2466,6 +2583,9 @@ var MarkdownHost = class {
     if (isChrome(selection.getRangeAt(0).startContainer))
       return null;
     const source = await this.app.vault.cachedRead(file);
+    const placed = placeByLines(source, selection.getRangeAt(0));
+    if (placed)
+      return this.anchorFor(source, placed.from, placed.to);
     const plain = project(source);
     const found = locateSelection(plain.text, selected, this.searchWindow(plain, source, selection));
     if (!found) {

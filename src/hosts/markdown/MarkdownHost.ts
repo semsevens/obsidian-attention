@@ -15,6 +15,7 @@ import { asEl, asImg, elementOf } from '../../dom';
 import { belongsTo, ownerOf } from './ownerView';
 import { isChrome, textBefore } from './renderedText';
 import { blockAround, sourceRangeOf } from './section';
+import { placeByLines } from './placeSelection';
 import { claimMenu, onLongPress, onTouchSelection } from '../../ui/touch';
 import { bodyStart, snapRange } from '../../anchor/snapRange';
 import { WrongNoteError } from '../../store/annotationStore';
@@ -371,6 +372,10 @@ export class MarkdownHost {
     if (isChrome(selection.getRangeAt(0).startContainer)) return null;
 
     const source = await this.app.vault.cachedRead(file);
+    const placed = placeByLines(source, selection.getRangeAt(0));
+    if (placed) return this.anchorFor(source, placed.from, placed.to);
+
+    // Views that record no line numbers fall back to searching for the words.
     // Search a projection of the source with inline markup stripped — that is
     // what the reader actually selected. Searching the raw source instead would
     // refuse any selection containing emphasis, a link or a highlight, which in

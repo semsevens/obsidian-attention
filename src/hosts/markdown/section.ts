@@ -12,7 +12,7 @@
  * can then move the answer.
  */
 
-import { Range, lineStarts, rangeOfLines } from '../../anchor/lines';
+import { Range as LineRange, lineStarts, rangeOfLines } from '../../anchor/lines';
 
 /** Attribute reading mode stamps on each rendered block. */
 export const LINES_ATTR = 'data-at-lines';
@@ -35,8 +35,9 @@ export function blockAround(node: Node | null): Element | null {
 }
 
 /** Where that block's text sits in the source, or null if it isn't marked. */
-export function sourceRangeOf(source: string, el: Element | null): Range | null {
+export function sourceRangeOf(source: string, el: Element | null): LineRange | null {
   const lines = linesOf(el);
   if (!lines) return null;
   return rangeOfLines(source, lineStarts(source), lines.start, lines.end);
 }
+
