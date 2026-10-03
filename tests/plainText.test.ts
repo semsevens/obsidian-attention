@@ -48,6 +48,53 @@ describe('project', () => {
   });
 });
 
+describe('project, where markup is really text', () => {
+  it('keeps underscores inside a word', () => {
+    expect(strip('配合 tool_search 在后续')).toBe('配合 tool_search 在后续');
+    expect(strip('snake_case_name and _em_')).toBe('snake_case_name and em');
+  });
+
+  it('draws inline code verbatim', () => {
+    expect(strip('去掉 `_meta` 的 `**kwargs`')).toBe('去掉 _meta 的 **kwargs');
+    expect(strip('``a ` b``')).toBe('a ` b');
+  });
+
+  it('draws a fenced block verbatim and drops its fences', () => {
+    expect(strip('前\n```js\nif (a_b * c_d) x = __y__;\n```\n后'))
+      .toBe('前\nif (a_b * c_d) x = __y__;\n\n后');
+    expect(strip('~~~\n~~not strike~~\n~~~')).toBe('~~not strike~~\n');
+  });
+
+  it('drops inline HTML tags and keeps what they hold', () => {
+    expect(strip('You Said No MCP!<sup>[1]</sup> 中解释了')).toBe('You Said No MCP![1] 中解释了');
+    expect(strip('a <span class="x">b</span><br/> c')).toBe('a b c');
+    expect(strip('1 < 2 and a<b')).toBe('1 < 2 and a<b');
+  });
+
+  it('honours backslash escapes', () => {
+    expect(strip('a \\*not em\\* b')).toBe('a *not em* b');
+  });
+
+  it('leaves a lone asterisk between spaces', () => {
+    expect(strip('2 * 3 = 6')).toBe('2 * 3 = 6');
+  });
+
+  it('still drops a backtick whose partner is outside the fragment', () => {
+    expect(strip('read` 、 bash')).toBe('read 、 bash');
+  });
+
+  it('keeps the offset map honest', () => {
+    for (const src of [
+      'MCP!<sup>[1]</sup> 中',
+      '`tool_search` 与 exit_code',
+      '前\n```\na_b\n```\n后',
+      'a \\*b\\* c',
+    ]) {
+      expect(mapIsConsistent(src), src).toBe(true);
+    }
+  });
+});
+
 describe('toSource', () => {
   it('maps a rendered range back onto the source, markup included', () => {
     const src = '看 **反向传播** 的原理';

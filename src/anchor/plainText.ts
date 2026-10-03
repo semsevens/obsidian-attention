@@ -21,13 +21,26 @@ export interface Projection {
 }
 
 /** Inline constructs that wrap text and should be unwrapped, longest first. */
-const WRAPPERS = ['***', '___', '**', '__', '~~', '==', '*', '_', '`'];
+const WRAPPERS = ['***', '___', '**', '__', '~~', '==', '*', '_'];
+
+/** A fence opening or closing a code block: up to three spaces, then ``` or ~~~. */
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+
+/** An inline HTML tag, opening or closing. Drawn as an element, never as text. */
+const TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>/y;
+
+/** What a backslash can escape: ASCII punctuation, per CommonMark. */
+const ESCAPABLE = /[!-\/:-@[-`{-~]/;
+
+const WORD = /[\p{L}\p{N}]/u;
+const SPACE = /\s/;
 
 /**
  * Build the reader's-eye view of `source`, with an offset for every character.
  *
  * Deliberately shallow: it handles the inline markers that break anchoring in
- * practice and leaves block structure alone. A full markdown parse would be
+ * practice, and code — whose markers are text — but otherwise leaves block
+ * structure alone. A full markdown parse would be
  * more correct and much more to go wrong; what matters here is that the
  * projection and the map stay in step.
  */
@@ -45,6 +58,42 @@ export function project(source: string): Projection {
   };
 
   while (i < source.length) {
+    // A fenced code block is drawn verbatim — an underscore or asterisk in
+    // there is code, not emphasis. The fence lines themselves are not drawn.
+    if (i === 0 || source[i - 1] === '\n') {
+      const block = fencedBlock(source, i);
+      if (block) {
+        i = block.body;
+        take(block.bodyEnd - i);
+        i = block.end;
+        continue;
+      }
+    }
+
+    // Inline code is drawn verbatim too, minus its backticks.
+    if (source[i] === '`') {
+      let run = 1;
+      while (source[i + run] === '`') run++;
+      const close = closingRun(source, i + run, run);
+      if (close < 0) { i += run; continue; }   // unpaired: a fragment's edge
+      i += run;
+      take(close - i);
+      i += run;
+      continue;
+    }
+
+    // `\*` is a literal asterisk: drop the backslash, keep what it protects.
+    if (source[i] === '\\' && ESCAPABLE.test(source[i + 1] ?? '')) {
+      i++;
+      take(1);
+      continue;
+    }
+
+    // `<sup>[1]</sup>` is drawn as `[1]`; the tags are elements, not text.
+    TAG.lastIndex = i;
+    const tag = TAG.exec(source);
+    if (tag) { i += tag[0].length; continue; }
+
     // Images vanish from the rendered text entirely, alt text included.
     if (source.startsWith('![', i)) {
       const close = matchLink(source, i + 1);
@@ -62,14 +111,61 @@ export function project(source: string): Projection {
       }
     }
 
-    // Wrappers contribute nothing visible; step over the marker only.
+    // Wrappers contribute nothing visible; step over the marker only — unless
+    // it can't be one: `tool_search` is a word, and ` * ` is an asterisk.
     const wrapper = WRAPPERS.find(w => source.startsWith(w, i));
-    if (wrapper) { i += wrapper.length; continue; }
+    if (wrapper) {
+      const before = source[i - 1] ?? ' ';
+      const after = source[i + wrapper.length] ?? ' ';
+      const intraword = wrapper[0] === '_' && WORD.test(before) && WORD.test(after);
+      const loose = SPACE.test(before) && SPACE.test(after);
+      if (intraword || loose) take(wrapper.length);
+      else i += wrapper.length;
+      continue;
+    }
 
     take(1);
   }
 
   return { text, map };
+}
+
+/** The line starting at `i`, without its newline. */
+function lineAt(source: string, i: number): string {
+  const end = source.indexOf('\n', i);
+  return source.slice(i, end < 0 ? source.length : end);
+}
+
+/**
+ * The fenced code block opening at `i`, if one does: where its body starts and
+ * ends, and where the closing fence ends. An unclosed block runs to the end of
+ * the note, which is how CommonMark reads it too.
+ */
+function fencedBlock(source: string, i: number): { body: number; bodyEnd: number; end: number } | null {
+  const fence = FENCE.exec(lineAt(source, i))?.[1];
+  if (!fence) return null;
+  const closing = new RegExp(`^ {0,3}\\${fence[0]}{${fence.length},}\\s*$`);
+  const newline = source.indexOf('\n', i);
+  if (newline < 0) return { body: source.length, bodyEnd: source.length, end: source.length };
+  const body = newline + 1;
+  for (let at = body; at < source.length; at += lineAt(source, at).length + 1) {
+    const line = lineAt(source, at);
+    if (closing.test(line)) return { body, bodyEnd: at, end: at + line.length };
+  }
+  return { body, bodyEnd: source.length, end: source.length };
+}
+
+/** Start of the next run of exactly `n` backticks from `i`, or -1. */
+function closingRun(source: string, i: number, n: number): number {
+  for (let k = i; k < source.length; k++) {
+    if (source[k] === '\n' && source[k + 1] === '\n') return -1;  // spans no blank line
+    if (source[k] !== '`') continue;
+    let run = 1;
+    while (source[k + run] === '`') run++;
+    if (run === n) return k;
+    k += run - 1;
+  }
+  return -1;
 }
 
 /** Strip markup, discarding the offsets. */

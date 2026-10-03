@@ -521,8 +521,14 @@ function countOccurrences(before, needle) {
 }
 
 // src/anchor/plainText.ts
-var WRAPPERS = ["***", "___", "**", "__", "~~", "==", "*", "_", "`"];
+var WRAPPERS = ["***", "___", "**", "__", "~~", "==", "*", "_"];
+var FENCE = /^ {0,3}(`{3,}|~{3,})/;
+var TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>/y;
+var ESCAPABLE = /[!-\/:-@[-`{-~]/;
+var WORD = /[\p{L}\p{N}]/u;
+var SPACE = /\s/;
 function project(source) {
+  var _a, _b, _c;
   let text = "";
   const map = [];
   let i = 0;
@@ -534,6 +540,40 @@ function project(source) {
     }
   };
   while (i < source.length) {
+    if (i === 0 || source[i - 1] === "\n") {
+      const block = fencedBlock(source, i);
+      if (block) {
+        i = block.body;
+        take(block.bodyEnd - i);
+        i = block.end;
+        continue;
+      }
+    }
+    if (source[i] === "`") {
+      let run = 1;
+      while (source[i + run] === "`")
+        run++;
+      const close = closingRun(source, i + run, run);
+      if (close < 0) {
+        i += run;
+        continue;
+      }
+      i += run;
+      take(close - i);
+      i += run;
+      continue;
+    }
+    if (source[i] === "\\" && ESCAPABLE.test((_a = source[i + 1]) != null ? _a : "")) {
+      i++;
+      take(1);
+      continue;
+    }
+    TAG.lastIndex = i;
+    const tag = TAG.exec(source);
+    if (tag) {
+      i += tag[0].length;
+      continue;
+    }
     if (source.startsWith("![", i)) {
       const close = matchLink(source, i + 1);
       if (close) {
@@ -552,12 +592,55 @@ function project(source) {
     }
     const wrapper = WRAPPERS.find((w) => source.startsWith(w, i));
     if (wrapper) {
-      i += wrapper.length;
+      const before = (_b = source[i - 1]) != null ? _b : " ";
+      const after = (_c = source[i + wrapper.length]) != null ? _c : " ";
+      const intraword = wrapper[0] === "_" && WORD.test(before) && WORD.test(after);
+      const loose = SPACE.test(before) && SPACE.test(after);
+      if (intraword || loose)
+        take(wrapper.length);
+      else
+        i += wrapper.length;
       continue;
     }
     take(1);
   }
   return { text, map };
+}
+function lineAt(source, i) {
+  const end = source.indexOf("\n", i);
+  return source.slice(i, end < 0 ? source.length : end);
+}
+function fencedBlock(source, i) {
+  var _a;
+  const fence = (_a = FENCE.exec(lineAt(source, i))) == null ? void 0 : _a[1];
+  if (!fence)
+    return null;
+  const closing = new RegExp(`^ {0,3}\\${fence[0]}{${fence.length},}\\s*$`);
+  const newline = source.indexOf("\n", i);
+  if (newline < 0)
+    return { body: source.length, bodyEnd: source.length, end: source.length };
+  const body = newline + 1;
+  for (let at = body; at < source.length; at += lineAt(source, at).length + 1) {
+    const line = lineAt(source, at);
+    if (closing.test(line))
+      return { body, bodyEnd: at, end: at + line.length };
+  }
+  return { body, bodyEnd: source.length, end: source.length };
+}
+function closingRun(source, i, n) {
+  for (let k = i; k < source.length; k++) {
+    if (source[k] === "\n" && source[k + 1] === "\n")
+      return -1;
+    if (source[k] !== "`")
+      continue;
+    let run = 1;
+    while (source[k + run] === "`")
+      run++;
+    if (run === n)
+      return k;
+    k += run - 1;
+  }
+  return -1;
 }
 function strip(source) {
   return project(source).text;
