@@ -9,97 +9,147 @@
  * markup the screen doesn't show, is placed the same way as any other.
  */
 
-import { align } from '../../anchor/align';
-import { LINES_ATTR, blockAround, sourceRangeOf } from './section';
+import { align, diffPairs } from '../../anchor/align';
+import { LINES_ATTR, sourceRangeOf } from './section';
+
+/** A rendered element and the source it was drawn from. */
+interface Unit {
+  el: Element;
+  lines: { from: number; to: number };
+}
 
 /** The selection's source range, or null when its blocks record no lines. */
 export function placeByLines(source: string, range: Range): { from: number; to: number } | null {
-  const blocks = blocksIn(range);
-  if (blocks.length === 0) return null;
+  const units = unitsIn(source, range);
+  if (units.length === 0) return null;
 
   for (const raw of [false, true]) {
-    const from = firstOf(blocks, block => edgeOffset(source, block, range, 'start', raw));
-    const to = firstOf([...blocks].reverse(), block => edgeOffset(source, block, range, 'end', raw));
-    if (from !== null && to !== null && to > from) return { from, to };
+    const from = firstOf(units, unit => edgeOffset(source, unit, range, 'start', raw));
+    if (from === null) continue;
+    // The end comes from the last unit that ends after the start. A footnote
+    // is drawn at the bottom of the note but defined wherever it was written,
+    // which can be above where the selection began.
+    const to = firstOf([...units].reverse(), unit => {
+      const end = edgeOffset(source, unit, range, 'end', raw);
+      return end !== null && end > from ? end : null;
+    });
+    // Only whitespace is a miss, not an answer: `**x** y` drawn from
+    // `****x**** y` pairs nothing but the space in a selection of `* `.
+    if (to !== null && source.slice(from, to).trim()) return { from, to };
   }
   return null;
 }
 
 /**
- * The first block, in order, that can say where an edge is.
+ * The first unit, in order, that can say where an edge is.
  *
- * Not every block can: Obsidian gathers a note's footnotes into one section at
- * the end and records it as the last line, while the definitions sit wherever
- * the author wrote them. A selection that runs into such a block stops at the
- * last one that can be measured, rather than failing as a whole.
+ * Not every one can: a transclusion's block in the host is drawn as the other
+ * note's text, and a block another plugin draws has no text from the file at
+ * all. A selection that runs into one stops at the last unit that can be
+ * measured, rather than failing as a whole.
  */
-function firstOf(blocks: Element[], measure: (block: Element) => number | null): number | null {
-  for (const block of blocks) {
-    const at = measure(block);
+function firstOf(units: Unit[], measure: (unit: Unit) => number | null): number | null {
+  for (const unit of units) {
+    const at = measure(unit);
     if (at !== null) return at;
   }
   return null;
 }
 
 /**
- * The whole source of the one block a selection lies in.
+ * The whole source of the blocks a selection touches, first to last.
  *
- * For a block another plugin draws — a terminal recording, a chart — whose
- * text on screen is not text in the file at all. There is nothing finer to
- * anchor to; the block itself is what was pointed at.
+ * The last resort, when nothing finer can be said: a block another plugin
+ * draws — a terminal recording, a chart — has no text from the file on screen
+ * at all, and footnotes are numbered in the order they are cited, not the
+ * order they are defined, so a selection across two can run backwards through
+ * the source. What was pointed at is still these blocks.
  */
-export function wholeBlock(source: string, range: Range): { from: number; to: number } | null {
-  const blocks = blocksIn(range);
-  return blocks.length === 1 ? sourceRangeOf(source, blocks[0]) : null;
+export function wholeBlocks(source: string, range: Range): { from: number; to: number } | null {
+  const units = unitsIn(source, range);
+  if (units.length === 0) return null;
+  return {
+    from: Math.min(...units.map(u => u.lines.from)),
+    to: Math.max(...units.map(u => u.lines.to)),
+  };
 }
 
 /**
- * The marked blocks a selection touches, in document order.
+ * What a selection touches, in document order, each with its source.
  *
- * Only those in the same rendering as the selection's start: a transcluded
- * note numbers its lines from its own file, so a block inside one and a block
- * outside it cannot be measured against the same source.
+ * Only within the rendering the selection starts in — the note, or the
+ * transclusion it starts inside, which numbers its lines from its own file.
+ * A selection that starts on a transclusion's title is inside it too.
+ *
+ * Footnotes are split out: Obsidian gathers them into one section recorded as
+ * the note's last line, so each item is matched to its own definition instead.
  */
-function blocksIn(range: Range): Element[] {
-  const start = blockAround(range.startContainer);
-  const common = range.commonAncestorContainer;
-  const root =
-    start?.closest('.markdown-embed-content, .markdown-preview-view') ??
-    (common.nodeType === 1 ? (common as Element) : common.parentElement)?.closest('.markdown-preview-view') ??
-    null;
-  if (!root) return start ? [start] : [];
+function unitsIn(source: string, range: Range): Unit[] {
+  const start = range.startContainer;
+  const startEl = start.nodeType === 1 ? (start as Element) : start.parentElement;
+  // A transclusion's title is drawn beside its content, not inside it.
+  const embed = startEl?.closest('.markdown-embed');
+  const content = embed && Array.from(embed.children).find(el => el.matches('.markdown-embed-content'));
+  const root = content ?? startEl?.closest('.markdown-preview-view');
+  if (!root) return [];
 
-  const scope = (el: Element) => el.parentElement?.closest('.markdown-embed-content') ?? null;
-  const home = start ? scope(start) : null;
-  return Array.from(root.querySelectorAll(`[${LINES_ATTR}]`)).filter(el =>
-    range.intersectsNode(el) && (start === null || scope(el) === home),
-  );
+  const embedOf = (el: Element) => el.parentElement?.closest('.markdown-embed-content') ?? null;
+  const home = root.matches('.markdown-embed-content') ? root : null;
+  const units: Unit[] = [];
+  for (const el of Array.from(root.querySelectorAll(`[${LINES_ATTR}]`))) {
+    if (embedOf(el) !== home || !range.intersectsNode(el)) continue;
+    const footnotes = el.querySelectorAll('section.footnotes li');
+    if (footnotes.length > 0) {
+      for (const li of Array.from(footnotes)) {
+        const lines = definitionOf(source, li.textContent ?? '');
+        if (lines && range.intersectsNode(li)) units.push({ el: li, lines });
+      }
+      continue;
+    }
+    const lines = sourceRangeOf(source, el);
+    if (lines) units.push({ el, lines });
+  }
+  return units;
+}
+
+/** The footnote definition line whose text is most like `text`. */
+function definitionOf(source: string, text: string): { from: number; to: number } | null {
+  let best: { from: number; to: number } | null = null;
+  let bestScore = 0;
+  const definitions = /^\[\^[^\]\n]+\]:[^\n]*$/gm;
+  for (let m = definitions.exec(source); m; m = definitions.exec(source)) {
+    const pairs = diffPairs(text, m[0]);
+    const score = pairs ? pairs.filter(j => j >= 0).length : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      best = { from: m.index, to: m.index + m[0].length };
+    }
+  }
+  return best;
 }
 
 /**
- * The source offset of one edge of `range`, measured inside `block`.
+ * The source offset of one edge of `range`, measured inside `unit`.
  *
- * An edge outside the block — the selection began above it or ended below it
- * — takes in all of it.
+ * An edge outside it — the selection began above it or ended below it — takes
+ * in all of it.
  */
 function edgeOffset(
   source: string,
-  block: Element,
+  { el, lines }: Unit,
   range: Range,
   edge: 'start' | 'end',
   raw: boolean,
 ): number | null {
-  const lines = sourceRangeOf(source, block);
-  if (!lines) return null;
-  const alignment = align(block.textContent ?? '', source.slice(lines.from, lines.to), raw);
+  const alignment = align(el.textContent ?? '', source.slice(lines.from, lines.to), raw);
   if (!alignment) return null;
 
   const node = edge === 'start' ? range.startContainer : range.endContainer;
   const offset = edge === 'start' ? range.startOffset : range.endOffset;
-  const before = block.ownerDocument.createRange();
-  before.setStart(block, 0);
-  if (block.contains(node)) before.setEnd(node, offset);
-  else if (edge === 'end') before.setEnd(block, block.childNodes.length);
+  const before = el.ownerDocument.createRange();
+  before.setStart(el, 0);
+  if (el.contains(node)) before.setEnd(node, offset);
+  else if (edge === 'end') before.setEnd(el, el.childNodes.length);
   const at = before.toString().length;
 
   return lines.from + (edge === 'start' ? alignment.start(at) : alignment.end(at));

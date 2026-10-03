@@ -31,14 +31,15 @@ describe('locateSelection', () => {
     expect(at.from).toBe(text.lastIndexOf('甲'));
   });
 
-  it('falls back to the nearest occurrence outside the window', () => {
-    const text = '甲 一二三 乙 四五六 甲';
-    const window = { from: text.indexOf('乙'), to: text.indexOf('乙') + 1, ordinal: 0 };
-    const at = locateSelection(text, '四五六 甲', window)!;
-    expect(text.slice(at.from, at.to)).toBe('四五六 甲');
+  it('looks only inside the window', () => {
+    // A lone bracket in a terminal recording, and one in the frontmatter.
+    const text = 'author: [[x]]\n\n正文 ] 在这里';
+    const window = { from: text.indexOf('正文'), to: text.length, ordinal: 0 };
+    expect(locateSelection(text, ' ] ', window)).toEqual({ from: text.lastIndexOf(']'), to: text.lastIndexOf(']') + 1 });
+    expect(locateSelection(text, 'author', window)).toBeNull();
   });
 
-  it('gives up only when the words are nowhere', () => {
+  it('gives up when the words are not there', () => {
     expect(locateSelection(SOURCE, '不存在的句子', { from: 0, to: 10, ordinal: 0 })).toBeNull();
     expect(locateSelection(SOURCE, ' \n ', { from: 0, to: 10, ordinal: 0 })).toBeNull();
   });

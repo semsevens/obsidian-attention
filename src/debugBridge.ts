@@ -14,7 +14,9 @@
 
 import { Plugin } from 'obsidian';
 
-export function startDebugBridge(plugin: Plugin): void {
+export function startDebugBridge(plugin: Plugin, build: string): void {
+  // Which build is running: Hot Reload swaps it in a moment after it lands.
+  (plugin as Plugin & { debugBuild?: string }).debugBuild = build;
   const adapter = plugin.app.vault.adapter;
   const dir = plugin.manifest.dir ?? '';
   const inbox = `${dir}/probe-in.js`;
@@ -53,7 +55,11 @@ export function startDebugBridge(plugin: Plugin): void {
       watcher.disconnect();
       console.error = consoleError;
     }
-    await adapter.write(outbox, JSON.stringify({ ...(result as object), notices, errors }, null, 2));
+    // Written aside and renamed into place, so a reader never sees half of it.
+    const partial = `${outbox}.partial`;
+    await adapter.write(partial, JSON.stringify({ ...(result as object), notices, errors }, null, 2));
+    if (await adapter.exists(outbox)) await adapter.remove(outbox);
+    await adapter.rename(partial, outbox);
     busy = false;
   };
 

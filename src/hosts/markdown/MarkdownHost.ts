@@ -1,7 +1,7 @@
 import { App, Editor, Menu, MarkdownView, MarkdownFileInfo, Notice, Plugin, TFile } from 'obsidian';
 import { MarkdownAnchor } from '../../model';
 import { describe, countOccurrences } from '../../anchor/textQuote';
-import { locateSelection, needleOf, SearchWindow } from '../../anchor/locateSelection';
+import { locateSelection, needleOf } from '../../anchor/locateSelection';
 import { Projection, project, toSource } from '../../anchor/plainText';
 import {
   findImageEmbeds, imageMatches, embedBySurroundings, srcHint, ImageEmbed,
@@ -14,8 +14,8 @@ import { AttentionSettings } from '../../settings';
 import { asEl, asImg, elementOf } from '../../dom';
 import { belongsTo, ownerOf } from './ownerView';
 import { isChrome, textBefore } from './renderedText';
-import { blockAround, sourceRangeOf } from './section';
-import { placeByLines, wholeBlock } from './placeSelection';
+import { blockAround } from './section';
+import { placeByLines, wholeBlocks } from './placeSelection';
 import { claimMenu, onLongPress, onTouchSelection } from '../../ui/touch';
 import { bodyStart, snapRange } from '../../anchor/snapRange';
 import { WrongNoteError } from '../../store/annotationStore';
@@ -366,73 +366,55 @@ export class MarkdownHost {
     const selection = window.getSelection();
     const selected = selection?.toString() ?? '';
     if (!selection || selected.trim().length === 0) return null;
-    // The properties table and the inline title are Obsidian's, not the note's.
-    // There is nothing in the file to anchor to, so this is not a failure to
-    // report — it is simply not something that can be marked.
-    if (isChrome(selection.getRangeAt(0).startContainer)) return null;
-
     const source = await this.app.vault.cachedRead(file);
     const placed = placeByLines(source, selection.getRangeAt(0));
     if (placed) return this.anchorFor(source, placed.from, placed.to);
 
-    // Views that record no line numbers fall back to searching for the words.
-    // Search a projection of the source with inline markup stripped — that is
-    // what the reader actually selected. Searching the raw source instead would
-    // refuse any selection containing emphasis, a link or a highlight, which in
-    // a real note is most of them.
+    // Reading mode recorded which blocks the selection touches, but they can't
+    // be aligned with their source — a plugin drew them, or they are not the
+    // text they claim. Look for the words in those blocks only: the nearest
+    // match elsewhere in the note is a guess, and a lone `]` matches anywhere.
+    // Not there, the blocks themselves are what was pointed at.
     const plain = project(source);
-
-    // Search the block the reader was pointing at, when reading mode has told
-    // us which one that is. Searching the whole note instead means finding the
-    // nth occurrence, and the count is taken from the screen — where Obsidian
-    // also draws the properties table, the frontmatter, and only the paragraphs
-    // it has got around to rendering. Every one of those has, at some point,
-    // moved the answer. Within one block there is nothing else to confuse it.
-    // The block is a preference, not a fence: a selection that runs out of it
-    // is still found, at the occurrence nearest to it.
-    const found = locateSelection(plain.text, selected, this.searchWindow(plain, source, selection));
-    if (!found) {
-      const block = wholeBlock(source, selection.getRangeAt(0));
-      if (block) return this.anchorFor(source, block.from, block.to);
-      new Notice('Attention: could not find that selection in the note.');
-      return null;
-    }
-    const range = toSource(plain, found.from, found.to);
-    if (!range) return null;
-    return this.anchorFor(source, range.from, range.to);
-  }
-
-  /**
-   * Where in the projected source to look, and which match to take.
-   *
-   * The block if we know it — one paragraph, where the reader's own ordinal is
-   * the only one that matters. Otherwise the body of the note, skipping the
-   * frontmatter, with the ordinal counted on screen; that is the older, weaker
-   * answer, kept for the views that record no line numbers.
-   */
-  private searchWindow(
-    plain: Projection,
-    source: string,
-    selection: Selection,
-  ): SearchWindow {
-    const block = sourceRangeOf(source, blockAround(selection.getRangeAt(0).startContainer));
-    if (block) {
-      const from = plain.map.findIndex(at => at >= block.from);
-      const after = plain.map.findIndex(at => at >= block.to);
-      return {
-        from: from < 0 ? 0 : from,
-        to: after < 0 ? plain.text.length : after,
+    const blocks = wholeBlocks(source, selection.getRangeAt(0));
+    if (blocks) {
+      const found = locateSelection(plain.text, selected, {
+        ...this.projected(plain, blocks),
         ordinal: this.ordinalWithin(selection),
-      };
+      });
+      const range = found && toSource(plain, found.from, found.to);
+      return (range && this.anchorFor(source, range.from, range.to)) ?? this.anchorFor(source, blocks.from, blocks.to);
     }
 
+    // The properties table and the inline title are Obsidian's, not the note's.
+    // A selection that stays there has nothing in the file to anchor to, which
+    // is not a failure to report — it is simply not something that can be
+    // marked. (One that runs on into the note was placed above.)
+    if (isChrome(selection.getRangeAt(0).startContainer)) return null;
+
+    // A view that records no line numbers at all: search the body of the note
+    // for the words, taking the occurrence that is as many matches in as the
+    // selection is on screen. Searching a projection of the source with inline
+    // markup stripped — that is what the reader actually selected.
     const body = plain.map.findIndex(at => at >= bodyStart(source));
-    return {
+    const found = locateSelection(plain.text, selected, {
       from: body < 0 ? 0 : body,
       to: plain.text.length,
       ordinal: this.renderedOrdinal(selection, needleOf(selection.toString())),
-    };
+    });
+    const range = found && toSource(plain, found.from, found.to);
+    const anchor = range && this.anchorFor(source, range.from, range.to);
+    if (!anchor) new Notice('Attention: could not find that selection in the note.');
+    return anchor;
   }
+
+  /** A source range as a range of the projection. */
+  private projected(plain: Projection, range: { from: number; to: number }): { from: number; to: number } {
+    const from = plain.map.findIndex(at => at >= range.from);
+    const after = plain.map.findIndex(at => at >= range.to);
+    return { from: from < 0 ? plain.text.length : from, to: after < 0 ? plain.text.length : after };
+  }
+
 
   /** How many identical matches precede the selection inside its own block. */
   private ordinalWithin(selection: Selection): number {

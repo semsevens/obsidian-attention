@@ -562,6 +562,13 @@ function project(source) {
       i += run;
       continue;
     }
+    if (source[i] === "$") {
+      const end = mathEnd(source, i);
+      if (end > 0) {
+        i = end;
+        continue;
+      }
+    }
     if (source[i] === "\\" && ESCAPABLE.test((_a = source[i + 1]) != null ? _a : "")) {
       i++;
       take(1);
@@ -604,6 +611,16 @@ function project(source) {
     take(1);
   }
   return { text, map };
+}
+function mathEnd(source, i) {
+  if (source.startsWith("$$", i)) {
+    const close = source.indexOf("$$", i + 2);
+    return close < 0 ? -1 : close + 2;
+  }
+  const inline = /\$(?=\S)[^$\n]*?\S\$(?!\d)|\$[^\s$]\$(?!\d)/y;
+  inline.lastIndex = i;
+  const m = inline.exec(source);
+  return m ? i + m[0].length : -1;
 }
 function lineAt(source, i) {
   const end = source.indexOf("\n", i);
@@ -1690,7 +1707,14 @@ function snapRange(source, from, to) {
     start++;
   while (end > start && /\s/.test(source[end - 1]))
     end--;
+  if (isLowSurrogate(source.charCodeAt(start)) && start > 0)
+    start--;
+  if (isLowSurrogate(source.charCodeAt(end)) && end < source.length)
+    end++;
   return end > start ? { from: start, to: end } : null;
+}
+function isLowSurrogate(code) {
+  return code >= 56320 && code <= 57343;
 }
 
 // src/anchor/repairAnchors.ts
@@ -1919,18 +1943,10 @@ function locateSelection(text, selected, window2) {
   const needle = needleOf(selected);
   if (needle.length === 0)
     return null;
-  const hits = matches(text, needle);
-  if (hits.length === 0)
+  const inside = matches(text, needle).filter((h) => h.from >= window2.from && h.to <= window2.to);
+  if (inside.length === 0)
     return null;
-  const inside = hits.filter((h) => h.from >= window2.from && h.to <= window2.to);
-  if (inside.length > 0)
-    return inside[Math.min(Math.max(window2.ordinal, 0), inside.length - 1)];
-  let best = hits[0];
-  for (const hit of hits) {
-    if (distance(hit, window2) < distance(best, window2))
-      best = hit;
-  }
-  return best;
+  return inside[Math.min(Math.max(window2.ordinal, 0), inside.length - 1)];
 }
 function matches(text, needle) {
   const pattern = new RegExp(needle.split(/\s+/).map(escape).join("\\s*"), "gu");
@@ -1939,13 +1955,6 @@ function matches(text, needle) {
     out.push({ from: m.index, to: m.index + m[0].length });
   }
   return out;
-}
-function distance(hit, window2) {
-  if (hit.to <= window2.from)
-    return window2.from - hit.to;
-  if (hit.from >= window2.to)
-    return hit.from - window2.to;
-  return 0;
 }
 function escape(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -2085,7 +2094,7 @@ function belongsTo(view, el) {
 }
 
 // src/hosts/markdown/renderedText.ts
-var UI = ["mod-ui", "metadata-container"];
+var UI = ["mod-ui", "metadata-container", "markdown-embed-title"];
 function isUi(node) {
   var _a;
   const el = node;
@@ -2226,61 +2235,99 @@ function backtrack(trace, n, m, pairs) {
 
 // src/hosts/markdown/placeSelection.ts
 function placeByLines(source, range) {
-  const blocks = blocksIn(range);
-  if (blocks.length === 0)
+  const units = unitsIn(source, range);
+  if (units.length === 0)
     return null;
   for (const raw of [false, true]) {
-    const from = firstOf(blocks, (block) => edgeOffset(source, block, range, "start", raw));
-    const to = firstOf([...blocks].reverse(), (block) => edgeOffset(source, block, range, "end", raw));
-    if (from !== null && to !== null && to > from)
+    const from = firstOf(units, (unit) => edgeOffset(source, unit, range, "start", raw));
+    if (from === null)
+      continue;
+    const to = firstOf([...units].reverse(), (unit) => {
+      const end = edgeOffset(source, unit, range, "end", raw);
+      return end !== null && end > from ? end : null;
+    });
+    if (to !== null && source.slice(from, to).trim())
       return { from, to };
   }
   return null;
 }
-function firstOf(blocks, measure) {
-  for (const block of blocks) {
-    const at = measure(block);
+function firstOf(units, measure) {
+  for (const unit of units) {
+    const at = measure(unit);
     if (at !== null)
       return at;
   }
   return null;
 }
-function wholeBlock(source, range) {
-  const blocks = blocksIn(range);
-  return blocks.length === 1 ? sourceRangeOf(source, blocks[0]) : null;
-}
-function blocksIn(range) {
-  var _a, _b, _c;
-  const start = blockAround(range.startContainer);
-  const common = range.commonAncestorContainer;
-  const root = (_c = (_b = start == null ? void 0 : start.closest(".markdown-embed-content, .markdown-preview-view")) != null ? _b : (_a = common.nodeType === 1 ? common : common.parentElement) == null ? void 0 : _a.closest(".markdown-preview-view")) != null ? _c : null;
-  if (!root)
-    return start ? [start] : [];
-  const scope = (el) => {
-    var _a2, _b2;
-    return (_b2 = (_a2 = el.parentElement) == null ? void 0 : _a2.closest(".markdown-embed-content")) != null ? _b2 : null;
-  };
-  const home = start ? scope(start) : null;
-  return Array.from(root.querySelectorAll(`[${LINES_ATTR}]`)).filter(
-    (el) => range.intersectsNode(el) && (start === null || scope(el) === home)
-  );
-}
-function edgeOffset(source, block, range, edge, raw) {
-  var _a;
-  const lines = sourceRangeOf(source, block);
-  if (!lines)
+function wholeBlocks(source, range) {
+  const units = unitsIn(source, range);
+  if (units.length === 0)
     return null;
-  const alignment = align((_a = block.textContent) != null ? _a : "", source.slice(lines.from, lines.to), raw);
+  return {
+    from: Math.min(...units.map((u) => u.lines.from)),
+    to: Math.max(...units.map((u) => u.lines.to))
+  };
+}
+function unitsIn(source, range) {
+  var _a;
+  const start = range.startContainer;
+  const startEl = start.nodeType === 1 ? start : start.parentElement;
+  const embed = startEl == null ? void 0 : startEl.closest(".markdown-embed");
+  const content = embed && Array.from(embed.children).find((el) => el.matches(".markdown-embed-content"));
+  const root = content != null ? content : startEl == null ? void 0 : startEl.closest(".markdown-preview-view");
+  if (!root)
+    return [];
+  const embedOf = (el) => {
+    var _a2, _b;
+    return (_b = (_a2 = el.parentElement) == null ? void 0 : _a2.closest(".markdown-embed-content")) != null ? _b : null;
+  };
+  const home = root.matches(".markdown-embed-content") ? root : null;
+  const units = [];
+  for (const el of Array.from(root.querySelectorAll(`[${LINES_ATTR}]`))) {
+    if (embedOf(el) !== home || !range.intersectsNode(el))
+      continue;
+    const footnotes = el.querySelectorAll("section.footnotes li");
+    if (footnotes.length > 0) {
+      for (const li of Array.from(footnotes)) {
+        const lines2 = definitionOf(source, (_a = li.textContent) != null ? _a : "");
+        if (lines2 && range.intersectsNode(li))
+          units.push({ el: li, lines: lines2 });
+      }
+      continue;
+    }
+    const lines = sourceRangeOf(source, el);
+    if (lines)
+      units.push({ el, lines });
+  }
+  return units;
+}
+function definitionOf(source, text) {
+  let best = null;
+  let bestScore = 0;
+  const definitions = /^\[\^[^\]\n]+\]:[^\n]*$/gm;
+  for (let m = definitions.exec(source); m; m = definitions.exec(source)) {
+    const pairs = diffPairs(text, m[0]);
+    const score = pairs ? pairs.filter((j) => j >= 0).length : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      best = { from: m.index, to: m.index + m[0].length };
+    }
+  }
+  return best;
+}
+function edgeOffset(source, { el, lines }, range, edge, raw) {
+  var _a;
+  const alignment = align((_a = el.textContent) != null ? _a : "", source.slice(lines.from, lines.to), raw);
   if (!alignment)
     return null;
   const node = edge === "start" ? range.startContainer : range.endContainer;
   const offset = edge === "start" ? range.startOffset : range.endOffset;
-  const before = block.ownerDocument.createRange();
-  before.setStart(block, 0);
-  if (block.contains(node))
+  const before = el.ownerDocument.createRange();
+  before.setStart(el, 0);
+  if (el.contains(node))
     before.setEnd(node, offset);
   else if (edge === "end")
-    before.setEnd(block, block.childNodes.length);
+    before.setEnd(el, el.childNodes.length);
   const at = before.toString().length;
   return lines.from + (edge === "start" ? alignment.start(at) : alignment.end(at));
 }
@@ -2591,56 +2638,44 @@ var MarkdownHost = class {
   }
   /** Locate a rendered selection in a file's source by ordinal. */
   async captureInFile(file) {
-    var _a;
+    var _a, _b;
     const selection = window.getSelection();
     const selected = (_a = selection == null ? void 0 : selection.toString()) != null ? _a : "";
     if (!selection || selected.trim().length === 0)
-      return null;
-    if (isChrome(selection.getRangeAt(0).startContainer))
       return null;
     const source = await this.app.vault.cachedRead(file);
     const placed = placeByLines(source, selection.getRangeAt(0));
     if (placed)
       return this.anchorFor(source, placed.from, placed.to);
     const plain = project(source);
-    const found = locateSelection(plain.text, selected, this.searchWindow(plain, source, selection));
-    if (!found) {
-      const block = wholeBlock(source, selection.getRangeAt(0));
-      if (block)
-        return this.anchorFor(source, block.from, block.to);
-      new import_obsidian9.Notice("Attention: could not find that selection in the note.");
-      return null;
-    }
-    const range = toSource(plain, found.from, found.to);
-    if (!range)
-      return null;
-    return this.anchorFor(source, range.from, range.to);
-  }
-  /**
-   * Where in the projected source to look, and which match to take.
-   *
-   * The block if we know it — one paragraph, where the reader's own ordinal is
-   * the only one that matters. Otherwise the body of the note, skipping the
-   * frontmatter, with the ordinal counted on screen; that is the older, weaker
-   * answer, kept for the views that record no line numbers.
-   */
-  searchWindow(plain, source, selection) {
-    const block = sourceRangeOf(source, blockAround(selection.getRangeAt(0).startContainer));
-    if (block) {
-      const from = plain.map.findIndex((at) => at >= block.from);
-      const after = plain.map.findIndex((at) => at >= block.to);
-      return {
-        from: from < 0 ? 0 : from,
-        to: after < 0 ? plain.text.length : after,
+    const blocks = wholeBlocks(source, selection.getRangeAt(0));
+    if (blocks) {
+      const found2 = locateSelection(plain.text, selected, {
+        ...this.projected(plain, blocks),
         ordinal: this.ordinalWithin(selection)
-      };
+      });
+      const range2 = found2 && toSource(plain, found2.from, found2.to);
+      return (_b = range2 && this.anchorFor(source, range2.from, range2.to)) != null ? _b : this.anchorFor(source, blocks.from, blocks.to);
     }
+    if (isChrome(selection.getRangeAt(0).startContainer))
+      return null;
     const body = plain.map.findIndex((at) => at >= bodyStart(source));
-    return {
+    const found = locateSelection(plain.text, selected, {
       from: body < 0 ? 0 : body,
       to: plain.text.length,
       ordinal: this.renderedOrdinal(selection, needleOf(selection.toString()))
-    };
+    });
+    const range = found && toSource(plain, found.from, found.to);
+    const anchor = range && this.anchorFor(source, range.from, range.to);
+    if (!anchor)
+      new import_obsidian9.Notice("Attention: could not find that selection in the note.");
+    return anchor;
+  }
+  /** A source range as a range of the projection. */
+  projected(plain, range) {
+    const from = plain.map.findIndex((at) => at >= range.from);
+    const after = plain.map.findIndex((at) => at >= range.to);
+    return { from: from < 0 ? plain.text.length : from, to: after < 0 ? plain.text.length : after };
   }
   /** How many identical matches precede the selection inside its own block. */
   ordinalWithin(selection) {
@@ -3168,7 +3203,7 @@ function repaintReadingViews(app, provider) {
     const view = leaf.view;
     if (!(view instanceof import_obsidian11.MarkdownView) || !view.file)
       continue;
-    const container = asEl(view.contentEl.querySelector(".markdown-preview-view"));
+    const container = asEl(view.previewMode.containerEl.querySelector(":scope > .markdown-preview-view"));
     if (!container)
       continue;
     const source = view.data;
@@ -3788,7 +3823,7 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
     if (this.settings.enableMarkdownHost)
       this.setupMarkdownHost();
     if (false)
-      startDebugBridge(this);
+      startDebugBridge(this, "");
     this.viewModes = new ViewModeHost(this.app, this, this.settings);
     this.viewModes.register();
     if (this.settings.enableTranscriptHost) {

@@ -27,6 +27,7 @@ import { ViewModeHost } from './hosts/markdown/viewModeHost';
 import { startDebugBridge } from './debugBridge';
 
 declare const ATTENTION_DEBUG: boolean;
+declare const ATTENTION_BUILD: string;
 
 export default class AttentionPlugin extends Plugin {
   settings!: AttentionSettings;
@@ -49,7 +50,7 @@ export default class AttentionPlugin extends Plugin {
     this.applyMarkColor();
 
     if (this.settings.enableMarkdownHost) this.setupMarkdownHost();
-    if (ATTENTION_DEBUG) startDebugBridge(this);
+    if (ATTENTION_DEBUG) startDebugBridge(this, ATTENTION_BUILD);
 
     // Registered whether or not the feature is on, so flipping the setting
     // takes effect without a reload; the setting is read per note.

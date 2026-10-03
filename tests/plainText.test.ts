@@ -71,6 +71,17 @@ describe('project, where markup is really text', () => {
     expect(strip('1 < 2 and a<b')).toBe('1 < 2 and a<b');
   });
 
+  it('drops math, which is typeset rather than drawn as its TeX', () => {
+    expect(strip('行内公式 $c_{s}^{*}$ 和 $x_1 + x_2$ 夹在中间')).toBe('行内公式  和  夹在中间');
+    expect(strip('前\n$$\nE = mc^2\n$$\n后')).toBe('前\n\n后');
+    expect(strip('一个 $x$ 字母')).toBe('一个  字母');
+  });
+
+  it('leaves dollars that are prices alone', () => {
+    expect(strip('花了 $5 和 $10')).toBe('花了 $5 和 $10');
+    expect(strip('a $ b $ c')).toBe('a $ b $ c');
+  });
+
   it('honours backslash escapes', () => {
     expect(strip('a \\*not em\\* b')).toBe('a *not em* b');
   });

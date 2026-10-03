@@ -1,11 +1,38 @@
 # Fixtures
 
-Notes to annotate while testing by hand. Copy them into a **development
-vault** — never the one holding real writing:
+`fixtures/vault` **is** the development vault: open it in Obsidian as a vault
+of its own (never the one holding real writing), and list it first in
+`.dev-vault` so every build is deployed into it:
 
 ```bash
-cp fixtures/vault/*.md "$(cat .dev-vault)/_test/"
+echo "$PWD/fixtures/vault" > .dev-vault
 ```
+
+Its settings are kept here; the plugins it uses are not (they are other
+people's code) — install Hot Reload, Media Transcript, Archive Redirect and
+Asciinema Player into it once. Marks made while testing (`*.anno.json`) and
+recordings (`录音/`) are ignored.
+
+## End to end
+
+```bash
+npm run e2e
+```
+
+builds a debug version of the plugin into the vault, brings its window to the
+front, and has Obsidian make a few thousand random selections across every
+note here, checking each is captured as the source the reader was looking at.
+The vault has to be open. Point it at a real vault to find the next case:
+
+```bash
+E2E_VAULT=~/Desktop/ob/me E2E_FOLDER=raw/in E2E_NOTES=12 npm run e2e
+```
+
+When that finds something, write the smallest note here that reproduces it —
+in your own words: the repository is public and clipped articles are not ours
+to publish — and add a test beside the fix.
+
+## The notes
 
 Each one exists for a case that has broken at least once:
 
@@ -23,6 +50,11 @@ Each one exists for a case that has broken at least once:
 | `很长的笔记.md` | long enough that reading mode has not rendered the end of it — a mark there is not in the document until something scrolls to it |
 | `混排与表情.md` | Chinese, English and emoji on one line: offsets are UTF-16 code units, and an emoji is more than one |
 | `同名媒体.md` | a reminder that `x.mp4` and `x.m4a` get a sidecar each |
+| `选区-记号.md` | everything the screen draws differently from the source: `<sup>` footnote markers, `snake_case` in and out of code, fenced code, backslash escapes, `****literal asterisks****`, list, task and quote markers, math, a table, entities, an autolink |
+| `选区-脚注.md` | footnotes, which Obsidian renumbers and gathers at the end while recording that section as the note's last line |
+| `选区-插件渲染.md` | a block another plugin draws (Asciinema Player): its text on screen is not in the file at all |
+| `属性选区.md` | a description that repeats the first sentence, so the properties table shows it twice more |
+| `跨段.md` | a clipped-article opening: byline, image with a caption on its line, paragraphs and a list to drag across |
 
 Every row above is a case that has been wrong at some point. The image ones are
 worth spelling out, since three separate bugs came from them in one afternoon:

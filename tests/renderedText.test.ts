@@ -65,6 +65,12 @@ describe('isChrome', () => {
     expect(isChrome(inside)).toBe(true);
   });
 
+  it('recognises the title Obsidian draws over a transclusion', () => {
+    const inside = text('被嵌入');
+    tree(el('internal-embed markdown-embed', el('embed-title markdown-embed-title', inside)));
+    expect(isChrome(inside)).toBe(true);
+  });
+
   it('recognises a node inside anything marked mod-ui', () => {
     const inside = text(sentence);
     tree(el('el-pre mod-frontmatter mod-ui', inside));

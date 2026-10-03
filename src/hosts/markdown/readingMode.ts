@@ -58,7 +58,10 @@ export function repaintReadingViews(app: App, provider: Provider): void {
   for (const leaf of app.workspace.getLeavesOfType('markdown')) {
     const view = leaf.view;
     if (!(view instanceof MarkdownView) || !view.file) continue;
-    const container = asEl(view.contentEl.querySelector('.markdown-preview-view'));
+    // The reading layer by name: the first `.markdown-preview-view` under
+    // `contentEl` is a transclusion the editor layer has drawn, whenever the
+    // note has one.
+    const container = asEl(view.previewMode.containerEl.querySelector(':scope > .markdown-preview-view'));
     if (!container) continue;
 
     const source = view.data;

@@ -110,7 +110,12 @@ const context = await esbuild.context({
   sourcemap: prod ? false : "inline",
   treeShaking: true,
   // The debug bridge (src/debugBridge.ts) exists only in a debug build.
-  define: { ATTENTION_DEBUG: process.env.ATTENTION_DEBUG === "1" ? "true" : "false" },
+  // ATTENTION_BUILD names the build, so a test can tell it is talking to this
+  // one and not the one Hot Reload has yet to replace.
+  define: {
+    ATTENTION_DEBUG: process.env.ATTENTION_DEBUG === "1" ? "true" : "false",
+    ATTENTION_BUILD: JSON.stringify(process.env.ATTENTION_BUILD ?? ""),
+  },
   outfile: "main.js",
   plugins: [deployPlugin],
 });

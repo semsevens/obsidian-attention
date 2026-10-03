@@ -10,11 +10,11 @@
 // rarely the number in the file. So whitespace matches whitespace, any amount
 // of it, and the ends are trimmed.
 //
-// Where to look. The paragraph the reader pointed at is the right place, but
-// it is only known from line numbers Obsidian recorded when it last rendered
-// that paragraph, and a selection can run out of it. Finding the words a few
-// paragraphs away is a far better answer than finding nothing, so when the
-// paragraph doesn't hold them, the nearest occurrence wins.
+// This is the fallback. A selection is placed by position first (see
+// `placeSelection`); words are searched for only where that can't be done, and
+// only inside a window — the blocks the selection touches. A match elsewhere
+// in the note is a guess, and short selections match everywhere: a lone `]`
+// in a terminal recording once found one in the frontmatter.
 
 export interface SearchWindow {
   from: number;
@@ -28,7 +28,7 @@ export function needleOf(selected: string): string {
   return selected.trim();
 }
 
-/** Where `selected` sits in `text`, preferring the window, or null. */
+/** Where `selected` sits in `text`, inside the window, or null. */
 export function locateSelection(
   text: string,
   selected: string,
@@ -37,17 +37,9 @@ export function locateSelection(
   const needle = needleOf(selected);
   if (needle.length === 0) return null;
 
-  const hits = matches(text, needle);
-  if (hits.length === 0) return null;
-
-  const inside = hits.filter(h => h.from >= window.from && h.to <= window.to);
-  if (inside.length > 0) return inside[Math.min(Math.max(window.ordinal, 0), inside.length - 1)];
-
-  let best = hits[0];
-  for (const hit of hits) {
-    if (distance(hit, window) < distance(best, window)) best = hit;
-  }
-  return best;
+  const inside = matches(text, needle).filter(h => h.from >= window.from && h.to <= window.to);
+  if (inside.length === 0) return null;
+  return inside[Math.min(Math.max(window.ordinal, 0), inside.length - 1)];
 }
 
 /** Every non-overlapping match, whitespace in the needle matching any whitespace. */
@@ -58,12 +50,6 @@ function matches(text: string, needle: string): { from: number; to: number }[] {
     out.push({ from: m.index, to: m.index + m[0].length });
   }
   return out;
-}
-
-function distance(hit: { from: number; to: number }, window: SearchWindow): number {
-  if (hit.to <= window.from) return window.from - hit.to;
-  if (hit.from >= window.to) return hit.from - window.to;
-  return 0;
 }
 
 function escape(s: string): string {

@@ -92,6 +92,13 @@ export function project(source: string): Projection {
       continue;
     }
 
+    // Math is typeset: `$x_1$` is drawn as a formula whose text is nothing
+    // like the TeX, so neither side can be matched against the other.
+    if (source[i] === '$') {
+      const end = mathEnd(source, i);
+      if (end > 0) { i = end; continue; }
+    }
+
     // `\*` is a literal asterisk: drop the backslash, keep what it protects.
     if (source[i] === '\\' && ESCAPABLE.test(source[i + 1] ?? '')) {
       i++;
@@ -138,6 +145,24 @@ export function project(source: string): Projection {
   }
 
   return { text, map };
+}
+
+/**
+ * Where math opening at `i` ends, or -1 if this `$` doesn't open any.
+ *
+ * `$$…$$` may span lines. `$…$` stays on one, and follows the rule Obsidian
+ * and Pandoc share so that prices aren't formulas: no space just inside either
+ * dollar, and no digit straight after the closing one — `$5 and $10` is text.
+ */
+function mathEnd(source: string, i: number): number {
+  if (source.startsWith('$$', i)) {
+    const close = source.indexOf('$$', i + 2);
+    return close < 0 ? -1 : close + 2;
+  }
+  const inline = /\$(?=\S)[^$\n]*?\S\$(?!\d)|\$[^\s$]\$(?!\d)/y;
+  inline.lastIndex = i;
+  const m = inline.exec(source);
+  return m ? i + m[0].length : -1;
 }
 
 /** The line starting at `i`, without its newline. */

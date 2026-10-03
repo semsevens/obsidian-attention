@@ -90,4 +90,11 @@ describe('snapRange', () => {
     expect(snapRange(NOTE, from + 3, from)).toEqual({ from, to: from + 3 });
     expect(snapRange(NOTE, from, 10_000)?.to).toBe(NOTE.trimEnd().length);
   });
+
+  it('never splits an emoji in half', () => {
+    const src = '表情 🎯 和';
+    const mid = src.indexOf('🎯') + 1;          // between its two code units
+    expect(snapRange(src, 0, mid)).toEqual({ from: 0, to: mid + 1 });
+    expect(snapRange(src, mid, src.length)).toEqual({ from: mid - 1, to: src.length });
+  });
 });

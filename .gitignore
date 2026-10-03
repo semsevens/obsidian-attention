@@ -6,3 +6,14 @@ coverage/
 
 # Where this machine deploys dev builds (see esbuild.config.mjs)
 .dev-vault
+
+# The development vault (fixtures/vault) is opened by Obsidian directly. Keep
+# its settings and notes; leave out what Obsidian, the plugins and testing
+# write there, and recordings, which are somebody else's audio.
+fixtures/vault/.obsidian/plugins/
+fixtures/vault/.obsidian/workspace*.json
+fixtures/vault/.obsidian/graph.json
+fixtures/vault/.trash/
+fixtures/vault/录音/
+fixtures/vault/**/*.anno.json
+fixtures/vault/.obsidian/themes/

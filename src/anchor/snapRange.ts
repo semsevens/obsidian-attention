@@ -59,5 +59,14 @@ export function snapRange(source: string, from: number, to: number): Range | nul
   while (start < end && /\s/.test(source[start])) start++;
   while (end > start && /\s/.test(source[end - 1])) end--;
 
+  // Half an emoji is not a character. An edge between the two code units of
+  // a surrogate pair moves out to take the whole of it.
+  if (isLowSurrogate(source.charCodeAt(start)) && start > 0) start--;
+  if (isLowSurrogate(source.charCodeAt(end)) && end < source.length) end++;
+
   return end > start ? { from: start, to: end } : null;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
 }

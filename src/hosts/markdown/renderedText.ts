@@ -12,11 +12,11 @@
  * then looked for at an occurrence the file does not have — reported as "could
  * not find that selection in the note" for a selection sitting in plain sight.
  *
- * Obsidian marks most of it `mod-ui`; the properties table carries its own
- * name instead, so both are named here.
+ * Obsidian marks most of it `mod-ui`; the properties table and the title over
+ * a transclusion carry their own names instead, so all three are named here.
  */
 
-const UI = ['mod-ui', 'metadata-container'];
+const UI = ['mod-ui', 'metadata-container', 'markdown-embed-title'];
 
 function isUi(node: Node): boolean {
   const el = node as Partial<Element>;
