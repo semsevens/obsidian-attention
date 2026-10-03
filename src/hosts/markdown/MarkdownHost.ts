@@ -1,6 +1,7 @@
 import { App, Editor, Menu, MarkdownView, MarkdownFileInfo, Notice, Plugin, TFile } from 'obsidian';
 import { MarkdownAnchor } from '../../model';
-import { describe, nthOccurrence, countOccurrences } from '../../anchor/textQuote';
+import { describe, countOccurrences } from '../../anchor/textQuote';
+import { locateSelection, needleOf, SearchWindow } from '../../anchor/locateSelection';
 import { Projection, project, toSource } from '../../anchor/plainText';
 import {
   findImageEmbeds, imageMatches, embedBySurroundings, srcHint, ImageEmbed,
@@ -382,18 +383,14 @@ export class MarkdownHost {
     // also draws the properties table, the frontmatter, and only the paragraphs
     // it has got around to rendering. Every one of those has, at some point,
     // moved the answer. Within one block there is nothing else to confuse it.
-    const window_ = this.searchWindow(plain, source, selection);
-    const at = nthOccurrence(
-      plain.text.slice(window_.from, window_.to),
-      selected,
-      window_.ordinal,
-    );
-    if (at < 0) {
+    // The block is a preference, not a fence: a selection that runs out of it
+    // is still found, at the occurrence nearest to it.
+    const found = locateSelection(plain.text, selected, this.searchWindow(plain, source, selection));
+    if (!found) {
       new Notice('Attention: could not find that selection in the note.');
       return null;
     }
-    const start = window_.from + at;
-    const range = toSource(plain, start, start + selected.length);
+    const range = toSource(plain, found.from, found.to);
     if (!range) return null;
     return this.anchorFor(source, range.from, range.to);
   }
@@ -410,7 +407,7 @@ export class MarkdownHost {
     plain: Projection,
     source: string,
     selection: Selection,
-  ): { from: number; to: number; ordinal: number } {
+  ): SearchWindow {
     const block = sourceRangeOf(source, blockAround(selection.getRangeAt(0).startContainer));
     if (block) {
       const from = plain.map.findIndex(at => at >= block.from);
@@ -426,7 +423,7 @@ export class MarkdownHost {
     return {
       from: body < 0 ? 0 : body,
       to: plain.text.length,
-      ordinal: this.renderedOrdinal(selection, selection.toString()),
+      ordinal: this.renderedOrdinal(selection, needleOf(selection.toString())),
     };
   }
 
@@ -437,7 +434,7 @@ export class MarkdownHost {
     if (!block) return 0;
     return countOccurrences(
       textBefore(block, range.startContainer, range.startOffset),
-      selection.toString(),
+      needleOf(selection.toString()),
     );
   }
 

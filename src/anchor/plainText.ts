@@ -26,6 +26,13 @@ const WRAPPERS = ['***', '___', '**', '__', '~~', '==', '*', '_'];
 /** A fence opening or closing a code block: up to three spaces, then ``` or ~~~. */
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
+/**
+ * What opens a line without being drawn as text: quote bars, a heading's
+ * hashes, a bullet or a number (the browser draws those as markers, which a
+ * selection doesn't include), a task's checkbox.
+ */
+const LINE_MARKER = /(?:[ \t]*>[ \t]?)*[ \t]*(?:#{1,6}[ \t]+|[-*+][ \t]+(?:\[[ xX]\][ \t]+)?|\d{1,9}[.)][ \t]+)?/y;
+
 /** An inline HTML tag, opening or closing. Drawn as an element, never as text. */
 const TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>/y;
 
@@ -68,6 +75,9 @@ export function project(source: string): Projection {
         i = block.end;
         continue;
       }
+      LINE_MARKER.lastIndex = i;
+      const marker = LINE_MARKER.exec(source);
+      if (marker && marker[0].length > 0) { i += marker[0].length; continue; }
     }
 
     // Inline code is drawn verbatim too, minus its backticks.

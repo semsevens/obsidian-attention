@@ -500,14 +500,6 @@ function resolve(text, anchor) {
   }
   return { from: nearest, to: nearest + quote.length, how: "nearest" };
 }
-function nthOccurrence(text, needle, n) {
-  if (needle.length === 0 || n < 0)
-    return -1;
-  let at = text.indexOf(needle);
-  for (let i = 0; i < n && at >= 0; i++)
-    at = text.indexOf(needle, at + 1);
-  return at;
-}
 function countOccurrences(before, needle) {
   if (needle.length === 0)
     return 0;
@@ -523,6 +515,7 @@ function countOccurrences(before, needle) {
 // src/anchor/plainText.ts
 var WRAPPERS = ["***", "___", "**", "__", "~~", "==", "*", "_"];
 var FENCE = /^ {0,3}(`{3,}|~{3,})/;
+var LINE_MARKER = /(?:[ \t]*>[ \t]?)*[ \t]*(?:#{1,6}[ \t]+|[-*+][ \t]+(?:\[[ xX]\][ \t]+)?|\d{1,9}[.)][ \t]+)?/y;
 var TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>/y;
 var ESCAPABLE = /[!-\/:-@[-`{-~]/;
 var WORD = /[\p{L}\p{N}]/u;
@@ -546,6 +539,12 @@ function project(source) {
         i = block.body;
         take(block.bodyEnd - i);
         i = block.end;
+        continue;
+      }
+      LINE_MARKER.lastIndex = i;
+      const marker = LINE_MARKER.exec(source);
+      if (marker && marker[0].length > 0) {
+        i += marker[0].length;
         continue;
       }
     }
@@ -1912,6 +1911,46 @@ async function repairOnLoad(app, data) {
 // src/hosts/markdown/MarkdownHost.ts
 var import_obsidian9 = require("obsidian");
 
+// src/anchor/locateSelection.ts
+function needleOf(selected) {
+  return selected.trim();
+}
+function locateSelection(text, selected, window2) {
+  const needle = needleOf(selected);
+  if (needle.length === 0)
+    return null;
+  const hits = matches(text, needle);
+  if (hits.length === 0)
+    return null;
+  const inside = hits.filter((h) => h.from >= window2.from && h.to <= window2.to);
+  if (inside.length > 0)
+    return inside[Math.min(Math.max(window2.ordinal, 0), inside.length - 1)];
+  let best = hits[0];
+  for (const hit of hits) {
+    if (distance(hit, window2) < distance(best, window2))
+      best = hit;
+  }
+  return best;
+}
+function matches(text, needle) {
+  const pattern = new RegExp(needle.split(/\s+/).map(escape).join("\\s*"), "gu");
+  const out = [];
+  for (let m = pattern.exec(text); m; m = pattern.exec(text)) {
+    out.push({ from: m.index, to: m.index + m[0].length });
+  }
+  return out;
+}
+function distance(hit, window2) {
+  if (hit.to <= window2.from)
+    return window2.from - hit.to;
+  if (hit.from >= window2.to)
+    return hit.from - window2.to;
+  return 0;
+}
+function escape(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // src/ui/SelectionPopover.ts
 var SelectionPopover = class {
   constructor() {
@@ -2428,18 +2467,12 @@ var MarkdownHost = class {
       return null;
     const source = await this.app.vault.cachedRead(file);
     const plain = project(source);
-    const window_ = this.searchWindow(plain, source, selection);
-    const at = nthOccurrence(
-      plain.text.slice(window_.from, window_.to),
-      selected,
-      window_.ordinal
-    );
-    if (at < 0) {
+    const found = locateSelection(plain.text, selected, this.searchWindow(plain, source, selection));
+    if (!found) {
       new import_obsidian9.Notice("Attention: could not find that selection in the note.");
       return null;
     }
-    const start = window_.from + at;
-    const range = toSource(plain, start, start + selected.length);
+    const range = toSource(plain, found.from, found.to);
     if (!range)
       return null;
     return this.anchorFor(source, range.from, range.to);
@@ -2467,7 +2500,7 @@ var MarkdownHost = class {
     return {
       from: body < 0 ? 0 : body,
       to: plain.text.length,
-      ordinal: this.renderedOrdinal(selection, selection.toString())
+      ordinal: this.renderedOrdinal(selection, needleOf(selection.toString()))
     };
   }
   /** How many identical matches precede the selection inside its own block. */
@@ -2478,7 +2511,7 @@ var MarkdownHost = class {
       return 0;
     return countOccurrences(
       textBefore(block, range.startContainer, range.startOffset),
-      selection.toString()
+      needleOf(selection.toString())
     );
   }
   /**
