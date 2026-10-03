@@ -15,7 +15,7 @@ import { asEl, asImg, elementOf } from '../../dom';
 import { belongsTo, ownerOf } from './ownerView';
 import { isChrome, textBefore } from './renderedText';
 import { blockAround, sourceRangeOf } from './section';
-import { placeByLines } from './placeSelection';
+import { placeByLines, wholeBlock } from './placeSelection';
 import { claimMenu, onLongPress, onTouchSelection } from '../../ui/touch';
 import { bodyStart, snapRange } from '../../anchor/snapRange';
 import { WrongNoteError } from '../../store/annotationStore';
@@ -392,6 +392,8 @@ export class MarkdownHost {
     // is still found, at the occurrence nearest to it.
     const found = locateSelection(plain.text, selected, this.searchWindow(plain, source, selection));
     if (!found) {
+      const block = wholeBlock(source, selection.getRangeAt(0));
+      if (block) return this.anchorFor(source, block.from, block.to);
       new Notice('Attention: could not find that selection in the note.');
       return null;
     }

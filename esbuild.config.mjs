@@ -28,18 +28,23 @@ const PLUGIN_ID = JSON.parse(
 
 // Where to deploy is a property of this machine, not of the plugin, so it is
 // read from the environment or from a gitignored file rather than baked in.
-// Without either, the build simply doesn't deploy.
-function devVault() {
-  if (process.env.VAULT_PLUGIN_DIR !== undefined) return process.env.VAULT_PLUGIN_DIR;
-  try {
-    const vault = readFileSync(".dev-vault", "utf8").trim();
-    if (vault) return join(vault, ".obsidian/plugins", PLUGIN_ID);
-  } catch {
-    // No local config: nothing to deploy to.
+// `.dev-vault` lists vaults one per line, so a test vault and the one the
+// plugin is used in stay in step. Without either, the build doesn't deploy.
+function devVaults() {
+  if (process.env.VAULT_PLUGIN_DIR !== undefined) {
+    return process.env.VAULT_PLUGIN_DIR ? [process.env.VAULT_PLUGIN_DIR] : [];
   }
-  return "";
+  try {
+    return readFileSync(".dev-vault", "utf8")
+      .split("\n")
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(vault => join(vault, ".obsidian/plugins", PLUGIN_ID));
+  } catch {
+    return [];   // no local config: nothing to deploy to
+  }
 }
-const vaultDir = devVault();
+const vaultDirs = devVaults();
 
 const ASSETS = ["main.js", "manifest.json", "styles.css"];
 
@@ -48,7 +53,10 @@ async function exists(p) {
 }
 
 async function deploy() {
-  if (!vaultDir) return;   // no dev vault configured on this machine // explicitly disabled
+  for (const vaultDir of vaultDirs) await deployTo(vaultDir);
+}
+
+async function deployTo(vaultDir) {
   // Only deploy into a real vault — keeps CI (and any other machine) quiet
   // instead of creating a stray directory tree.
   if (!(await exists(dirname(dirname(vaultDir))))) {
@@ -101,6 +109,8 @@ const context = await esbuild.context({
   logLevel: "info",
   sourcemap: prod ? false : "inline",
   treeShaking: true,
+  // The debug bridge (src/debugBridge.ts) exists only in a debug build.
+  define: { ATTENTION_DEBUG: process.env.ATTENTION_DEBUG === "1" ? "true" : "false" },
   outfile: "main.js",
   plugins: [deployPlugin],
 });

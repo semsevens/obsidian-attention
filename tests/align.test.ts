@@ -52,6 +52,13 @@ describe('align', () => {
     expect(a.start(0)).toBe(3);
   });
 
+  it('pairs asterisks the screen draws when aligned against the raw source', () => {
+    const src = '****格林布拉特**** 我觉得\n';
+    const rendered = '**格林布拉特** 我觉得';
+    const a = align(rendered, src, true)!;
+    expect(src.slice(a.start(0), a.end(1))).toBe('*');
+  });
+
   it('refuses a block whose source is some other paragraph', () => {
     expect(align('完全不同的一段话', '另外一个段落的内容\n')).toBeNull();
   });

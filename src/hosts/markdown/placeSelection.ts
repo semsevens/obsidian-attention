@@ -17,9 +17,40 @@ export function placeByLines(source: string, range: Range): { from: number; to: 
   const blocks = blocksIn(range);
   if (blocks.length === 0) return null;
 
-  const from = edgeOffset(source, blocks[0], range, 'start');
-  const to = edgeOffset(source, blocks[blocks.length - 1], range, 'end');
-  return from !== null && to !== null && to > from ? { from, to } : null;
+  for (const raw of [false, true]) {
+    const from = firstOf(blocks, block => edgeOffset(source, block, range, 'start', raw));
+    const to = firstOf([...blocks].reverse(), block => edgeOffset(source, block, range, 'end', raw));
+    if (from !== null && to !== null && to > from) return { from, to };
+  }
+  return null;
+}
+
+/**
+ * The first block, in order, that can say where an edge is.
+ *
+ * Not every block can: Obsidian gathers a note's footnotes into one section at
+ * the end and records it as the last line, while the definitions sit wherever
+ * the author wrote them. A selection that runs into such a block stops at the
+ * last one that can be measured, rather than failing as a whole.
+ */
+function firstOf(blocks: Element[], measure: (block: Element) => number | null): number | null {
+  for (const block of blocks) {
+    const at = measure(block);
+    if (at !== null) return at;
+  }
+  return null;
+}
+
+/**
+ * The whole source of the one block a selection lies in.
+ *
+ * For a block another plugin draws — a terminal recording, a chart — whose
+ * text on screen is not text in the file at all. There is nothing finer to
+ * anchor to; the block itself is what was pointed at.
+ */
+export function wholeBlock(source: string, range: Range): { from: number; to: number } | null {
+  const blocks = blocksIn(range);
+  return blocks.length === 1 ? sourceRangeOf(source, blocks[0]) : null;
 }
 
 /**
@@ -51,10 +82,16 @@ function blocksIn(range: Range): Element[] {
  * An edge outside the block — the selection began above it or ended below it
  * — takes in all of it.
  */
-function edgeOffset(source: string, block: Element, range: Range, edge: 'start' | 'end'): number | null {
+function edgeOffset(
+  source: string,
+  block: Element,
+  range: Range,
+  edge: 'start' | 'end',
+  raw: boolean,
+): number | null {
   const lines = sourceRangeOf(source, block);
   if (!lines) return null;
-  const alignment = align(block.textContent ?? '', source.slice(lines.from, lines.to));
+  const alignment = align(block.textContent ?? '', source.slice(lines.from, lines.to), raw);
   if (!alignment) return null;
 
   const node = edge === 'start' ? range.startContainer : range.endContainer;

@@ -24,6 +24,9 @@ import { readingModeHighlighter, repaintReadingViews } from './hosts/markdown/re
 import { TranscriptHost } from './hosts/transcript/TranscriptHost';
 import { planMove } from './store/migrateToTrack';
 import { ViewModeHost } from './hosts/markdown/viewModeHost';
+import { startDebugBridge } from './debugBridge';
+
+declare const ATTENTION_DEBUG: boolean;
 
 export default class AttentionPlugin extends Plugin {
   settings!: AttentionSettings;
@@ -46,6 +49,7 @@ export default class AttentionPlugin extends Plugin {
     this.applyMarkColor();
 
     if (this.settings.enableMarkdownHost) this.setupMarkdownHost();
+    if (ATTENTION_DEBUG) startDebugBridge(this);
 
     // Registered whether or not the feature is on, so flipping the setting
     // takes effect without a reload; the setting is read per note.

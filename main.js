@@ -2154,8 +2154,8 @@ function sourceRangeOf(source, el) {
 
 // src/anchor/align.ts
 var MAX_EDITS = 2e3;
-function align(rendered, source) {
-  const plain = project(source);
+function align(rendered, source, raw = false) {
+  const plain = raw ? { text: source, map: Array.from(source, (_, i) => i) } : project(source);
   const pairs = diffPairs(rendered, plain.text);
   if (!pairs)
     return null;
@@ -2229,9 +2229,25 @@ function placeByLines(source, range) {
   const blocks = blocksIn(range);
   if (blocks.length === 0)
     return null;
-  const from = edgeOffset(source, blocks[0], range, "start");
-  const to = edgeOffset(source, blocks[blocks.length - 1], range, "end");
-  return from !== null && to !== null && to > from ? { from, to } : null;
+  for (const raw of [false, true]) {
+    const from = firstOf(blocks, (block) => edgeOffset(source, block, range, "start", raw));
+    const to = firstOf([...blocks].reverse(), (block) => edgeOffset(source, block, range, "end", raw));
+    if (from !== null && to !== null && to > from)
+      return { from, to };
+  }
+  return null;
+}
+function firstOf(blocks, measure) {
+  for (const block of blocks) {
+    const at = measure(block);
+    if (at !== null)
+      return at;
+  }
+  return null;
+}
+function wholeBlock(source, range) {
+  const blocks = blocksIn(range);
+  return blocks.length === 1 ? sourceRangeOf(source, blocks[0]) : null;
 }
 function blocksIn(range) {
   var _a, _b, _c;
@@ -2249,12 +2265,12 @@ function blocksIn(range) {
     (el) => range.intersectsNode(el) && (start === null || scope(el) === home)
   );
 }
-function edgeOffset(source, block, range, edge) {
+function edgeOffset(source, block, range, edge, raw) {
   var _a;
   const lines = sourceRangeOf(source, block);
   if (!lines)
     return null;
-  const alignment = align((_a = block.textContent) != null ? _a : "", source.slice(lines.from, lines.to));
+  const alignment = align((_a = block.textContent) != null ? _a : "", source.slice(lines.from, lines.to), raw);
   if (!alignment)
     return null;
   const node = edge === "start" ? range.startContainer : range.endContainer;
@@ -2589,6 +2605,9 @@ var MarkdownHost = class {
     const plain = project(source);
     const found = locateSelection(plain.text, selected, this.searchWindow(plain, source, selection));
     if (!found) {
+      const block = wholeBlock(source, selection.getRangeAt(0));
+      if (block)
+        return this.anchorFor(source, block.from, block.to);
       new import_obsidian9.Notice("Attention: could not find that selection in the note.");
       return null;
     }
@@ -3768,6 +3787,8 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
     this.applyMarkColor();
     if (this.settings.enableMarkdownHost)
       this.setupMarkdownHost();
+    if (false)
+      startDebugBridge(this);
     this.viewModes = new ViewModeHost(this.app, this, this.settings);
     this.viewModes.register();
     if (this.settings.enableTranscriptHost) {

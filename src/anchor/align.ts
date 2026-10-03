@@ -36,8 +36,11 @@ export interface Alignment {
  *
  * Offsets returned are relative to `source`.
  */
-export function align(rendered: string, source: string): Alignment | null {
-  const plain = project(source);
+export function align(rendered: string, source: string, raw = false): Alignment | null {
+  // Against the projection by default: fewer differences, and a link's label
+  // can't be paired with the same words in its URL. Against the raw source
+  // when the projection itself is wrong — `****x****` draws its asterisks.
+  const plain = raw ? { text: source, map: Array.from(source, (_, i) => i) } : project(source);
   const pairs = diffPairs(rendered, plain.text);
   if (!pairs) return null;
   if (pairs.filter(j => j >= 0).length * 2 < rendered.length) return null;
