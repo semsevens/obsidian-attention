@@ -178,10 +178,15 @@ npm test         # vitest, watch with: npm run test:watch
 ```
 
 `npm run dev` copies `main.js`, `manifest.json` and `styles.css` into
-the vault named in `.dev-vault` after every rebuild (`styles.css` is
-watched separately, so CSS-only edits deploy too). Point it elsewhere with
-`VAULT_PLUGIN_DIR=/path/to/vault/.obsidian/plugins/attention`, or set it empty to
-skip deploying.
+every vault listed in `.dev-vault` (one per line) after every rebuild
+(`styles.css` is watched separately, so CSS-only edits deploy too). Point it
+elsewhere with `VAULT_PLUGIN_DIR=/path/to/vault/.obsidian/plugins/attention`,
+or set it empty to skip deploying.
+
+The development vault is in this repository: `fixtures/vault`. Open it in
+Obsidian as a vault of its own and list it first in `.dev-vault`; see
+[fixtures/README.md](fixtures/README.md) for what each note is for and which
+plugins it needs.
 
 Copy, not symlink — this repo lives in iCloud Drive, and aiming a vault at an iCloud
 path risks Obsidian stalling on an evicted file.
@@ -192,7 +197,27 @@ Obsidian will reload the plugin on every rebuild; the build already writes the
 
 ### What is tested
 
-The pure logic — sidecar path rules and the review policy. Both decide whether a
-passage you marked can still be found and shown to you again, and both fail
-*silently* when wrong, which is exactly what clicking around does not catch. The UI
-layers are left to manual testing.
+`npm test` covers the pure logic — anchoring, sidecar path rules, the review
+policy — and placing a reading-mode selection against the DOM Obsidian draws
+(under happy-dom). All of it decides whether a passage you marked can still be
+found and shown to you again, and all of it fails *silently* when wrong, which is
+exactly what clicking around does not catch.
+
+`npm run e2e` checks the rest in a running Obsidian, with the fixtures vault open:
+thousands of random selections across every note, each checked to be captured as
+the source the reader was looking at, and jumping to a mark from the review panel.
+Point it at a real vault to find the next case:
+
+```bash
+E2E_VAULT=~/path/to/vault E2E_FOLDER=some/folder E2E_NOTES=12 npm run e2e
+```
+
+### Releasing
+
+How a release goes out — versions, tagging, the community directory's automated
+review and what it rejects — is written down in the maintainer's notes,
+[obsidian-plugin-publishing](https://github.com/semsevens/obsidian-plugin-publishing)
+(a private repository; check it out next to this one). In short: run the
+review's lint rules locally first, bump `manifest.json`, `package.json` and
+`versions.json` together, push a tag equal to the version (no `v`), and check
+the community directory's review for that version before calling it released.
