@@ -1,4 +1,4 @@
-// Runs inside Obsidian through the debug bridge (src/debugBridge.ts); `app`,
+// Runs inside Obsidian through the debug bridge (scripts/e2e/debug-entry.js); `app`,
 // `plugin` and `CONFIG` are in scope. See scripts/e2e.mjs.
 //
 // Makes random selections in reading mode, the way a reader drags, and checks

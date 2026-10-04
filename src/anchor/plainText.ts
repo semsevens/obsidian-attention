@@ -37,7 +37,7 @@ const LINE_MARKER = /(?:[ \t]*>[ \t]?)*[ \t]*(?:#{1,6}[ \t]+|[-*+][ \t]+(?:\[[ x
 const TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>/y;
 
 /** What a backslash can escape: ASCII punctuation, per CommonMark. */
-const ESCAPABLE = /[!-\/:-@[-`{-~]/;
+const ESCAPABLE = /[!-/:-@[-`{-~]/;
 
 const WORD = /[\p{L}\p{N}]/u;
 const SPACE = /\s/;

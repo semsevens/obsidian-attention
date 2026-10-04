@@ -3,7 +3,7 @@
 //   npm run e2e                      # every note in the fixtures vault
 //   E2E_VAULT=~/vault E2E_FOLDER=raw/in E2E_NOTES=12 npm run e2e
 //
-// Builds the plugin with the debug bridge (src/debugBridge.ts), deploys it
+// Builds the plugin with the debug bridge (scripts/e2e/debug-entry.js), deploys it
 // into the vault, waits for Hot Reload to load it, then hands Obsidian
 // scripts/e2e/fuzz.js and reports what came back. The vault has to be open in
 // Obsidian: `open "obsidian://open?vault=<its folder name>"`.

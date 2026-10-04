@@ -517,7 +517,7 @@ var WRAPPERS = ["***", "___", "**", "__", "~~", "==", "*", "_"];
 var FENCE = /^ {0,3}(`{3,}|~{3,})/;
 var LINE_MARKER = /(?:[ \t]*>[ \t]?)*[ \t]*(?:#{1,6}[ \t]+|[-*+][ \t]+(?:\[[ xX]\][ \t]+)?|\d{1,9}[.)][ \t]+)?/y;
 var TAG = /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>\n]*)?\/?>/y;
-var ESCAPABLE = /[!-\/:-@[-`{-~]/;
+var ESCAPABLE = /[!-/:-@[-`{-~]/;
 var WORD = /[\p{L}\p{N}]/u;
 var SPACE = /\s/;
 function project(source) {
@@ -3822,8 +3822,6 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
     this.applyMarkColor();
     if (this.settings.enableMarkdownHost)
       this.setupMarkdownHost();
-    if (false)
-      startDebugBridge(this, "");
     this.viewModes = new ViewModeHost(this.app, this, this.settings);
     this.viewModes.register();
     if (this.settings.enableTranscriptHost) {
