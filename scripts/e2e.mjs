@@ -8,6 +8,9 @@
 // scripts/e2e/fuzz.js and reports what came back. The vault has to be open in
 // Obsidian: `open "obsidian://open?vault=<its folder name>"`.
 //
+// Then scripts/e2e/reveal.js: clicking a record in the review panel, which
+// should scroll only when the mark is out of sight.
+//
 // Unit tests cover what each piece does with the DOM it is given; this covers
 // whether that DOM is what Obsidian actually draws, which no fixture can.
 
@@ -106,5 +109,20 @@ for (const row of result.value) {
   for (const f of row.failures.slice(0, 3)) console.log("    ", JSON.stringify(f));
 }
 for (const e of result.errors) console.log("  console error:", e.slice(0, 300));
+
+// Going to a mark from the review panel: in sight, in one move, and not at all
+// when it already is. Needs the fixture note, so only in the fixtures vault.
+const reveal = await probe(readFileSync(new URL("./e2e/reveal.js", import.meta.url), "utf8"), 120);
+if (!reveal?.ok) {
+  failures++;
+  console.log("✗ jumping to a mark:", reveal?.error ?? "no answer");
+} else if (reveal.value.skipped) {
+  console.log(`- jumping to a mark: skipped (${reveal.value.skipped})`);
+} else {
+  failures += reveal.value.failures.length;
+  console.log(`${reveal.value.failures.length ? "✗" : "✓"} jumping to a mark from the review panel`);
+  for (const f of reveal.value.failures) console.log("    ", JSON.stringify(f));
+}
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures || result.errors.length ? 1 : 0);

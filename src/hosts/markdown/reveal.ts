@@ -47,7 +47,7 @@ async function revealInTranscript(app: App, file: TFile, annotation: Annotation)
   playUntilEndOfSegment(media, starts, at, media.duration);
   void media.play();
 
-  await flashWhenPainted(document.body, annotation.id, '.mt-transcript');
+  await showMark(document.body, annotation.id, '.mt-transcript', '.mt-transcript', () => {});
 }
 
 function nonEmpty<T>(items: T[]): T[] | null {
@@ -132,23 +132,9 @@ async function revealInMarkdown(
   file: TFile,
   annotation: Annotation,
 ): Promise<void> {
-  // Work out where to land *before* opening, and let Obsidian do the scrolling
-  // as part of the open. Scrolling afterwards is too late: the view restores
-  // its own position while it sets itself up, and overwrites ours. That is why
-  // jumping to a mark took two clicks — the first opened the note, and only
-  // the second, with the view already settled, could move it.
   const line = await lineOfMark(app, file, annotation);
-
-  const leaf = app.workspace.getLeaf(false);
-  // `scroll`, not `line`: both take the view to that line, but `line` also
-  // flashes the whole block yellow — Obsidian's way of saying "here is what you
-  // followed a link to". Next to a mark on three words, a highlight over the
-  // entire paragraph reads as the mark itself, and the mark already flashes on
-  // its own once it is painted.
-  await leaf.openFile(file, line === null ? undefined : { eState: { scroll: line } });
-
-  const view = leaf.view;
-  if (!(view instanceof MarkdownView)) return;
+  const view = await showNote(app, file, line);
+  if (!view) return;
 
   if (view.getMode() === 'source') {
     if (annotation.anchor.kind !== 'markdown') return;
@@ -158,18 +144,43 @@ async function revealInMarkdown(
     const from = editor.offsetToPos(at.from);
     const to = editor.offsetToPos(at.to);
     editor.setSelection(from, to);
-    editor.scrollIntoView({ from, to }, true);
     // The selection is the feedback here, but a mark should announce itself the
     // same way wherever it is found — otherwise whether a jump "flashes"
     // depends on which mode the note happened to be in.
-    await flashWhenPainted(view.contentEl, annotation.id, '.cm-content');
+    await showMark(view.contentEl, annotation.id, '.cm-content', '.cm-scroller',
+      () => editor.scrollIntoView({ from, to }, true));
     return;
   }
 
   // Reading mode renders lazily, so the mark's paragraph may not be in the
-  // document at all — there is no painted span to wait for until the scroll
-  // above has made Obsidian render that part of the note.
-  await flashWhenPainted(view.contentEl, annotation.id, '.markdown-preview-view');
+  // document at all until Obsidian has been asked to scroll to its line.
+  await showMark(view.contentEl, annotation.id, '.markdown-preview-view', '.markdown-preview-view',
+    () => { if (line !== null) view.setEphemeralState({ scroll: line }); });
+}
+
+/**
+ * Put the note in front of the reader, without moving it if it already is.
+ *
+ * A note already open in a tab is switched to, not opened again: opening it
+ * scrolls the view to the mark's line whether or not the mark was already in
+ * sight, which is what made a second click on the same record jolt the page.
+ *
+ * A note that has to be opened is told the line as part of the open. Scrolling
+ * afterwards is too late: the view restores its own position while it sets
+ * itself up, and overwrites ours. `scroll`, not `line`: both take the view
+ * there, but `line` also flashes the whole block — next to a mark on three
+ * words, that reads as the mark itself.
+ */
+async function showNote(app: App, file: TFile, line: number | null): Promise<MarkdownView | null> {
+  const open = app.workspace.getLeavesOfType('markdown')
+    .find(leaf => leaf.view instanceof MarkdownView && leaf.view.file === file);
+  if (open) {
+    app.workspace.setActiveLeaf(open, { focus: true });
+    return open.view instanceof MarkdownView ? open.view : null;
+  }
+  const leaf = app.workspace.getLeaf(false);
+  await leaf.openFile(file, line === null ? undefined : { eState: { scroll: line } });
+  return leaf.view instanceof MarkdownView ? leaf.view : null;
 }
 
 /** The line the mark sits on now, or null if it cannot be placed. */
@@ -185,33 +196,33 @@ async function lineOfMark(app: App, file: TFile, annotation: Annotation): Promis
 }
 
 /**
- * Wait for the highlight to appear, then scroll to it.
+ * Wait for the mark to be drawn in the layer the reader is looking at, bring it
+ * into sight if it is not already, and flash it.
  *
- * Reading mode re-renders on its own schedule; rather than guess at a delay,
- * poll briefly and give up quietly if the annotation turns out to be orphaned
- * (in which case nothing was painted and there is nothing to scroll to).
- */
-/**
- * Wait for the mark to be drawn in the layer the reader is looking at, then
- * flash it.
+ * Only a mark out of sight is scrolled to. One already on screen stays where
+ * the reader put it — they asked where it is, and it is right there.
+ *
+ * A mark not drawn yet is usually just off screen: reading mode and the editor
+ * both draw only what is near the view. `bringNear` asks the view to go to it,
+ * once, if a short wait doesn't turn it up.
  *
  * The layer has to be named. A note open in reading mode still has the
  * editor's copy of it underneath, hidden, and in document order the hidden one
  * comes first — so "the mark with this id" flashed something invisible
- * whenever both layers had drawn it, which is whenever the note is short
- * enough for the editor to have got that far. Longer notes flashed correctly,
- * and the flash looked as though it came and went at random.
- *
- * Asking which is visible is no good either: an unfocused window has laid
- * nothing out, and every answer is "no".
+ * whenever both layers had drawn it, and the flash seemed to come and go at
+ * random. Asking which is visible is no good either: an unfocused window has
+ * laid nothing out, and every answer is "no".
  */
-async function flashWhenPainted(
+async function showMark(
   root: HTMLElement,
   id: string,
   layer: string,
-  tries = 20,
+  scroller: string,
+  bringNear: () => void,
+  tries = 30,
 ): Promise<void> {
   for (let i = 0; i < tries; i++) {
+    if (i === 5) bringNear();
     // Anything carrying the id, not only text spans: a marked picture is an
     // `<img>` with the same attribute, and looking for `.at-hl` meant image
     // marks never flashed at all.
@@ -219,7 +230,10 @@ async function flashWhenPainted(
       .map(asEl)
       .filter((el): el is HTMLElement => el !== null);
     if (marks.length > 0) {
-      marks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const view = asEl(marks[0].closest(scroller));
+      if (!view || !inSight(marks[0], view)) {
+        marks[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
       // All of them: a mark across four paragraphs is four spans, and flashing
       // one of the four says less than it should.
       for (const el of marks) flash(el);
@@ -227,6 +241,16 @@ async function flashWhenPainted(
     }
     await new Promise(r => window.setTimeout(r, 50));
   }
+}
+
+/** Whether `el` is wholly within the visible part of `view`, and of the window. */
+function inSight(el: HTMLElement, view: HTMLElement): boolean {
+  const mark = el.getBoundingClientRect();
+  const port = view.getBoundingClientRect();
+  const win = el.win;
+  return mark.height > 0 &&
+    mark.top >= Math.max(port.top, 0) &&
+    mark.bottom <= Math.min(port.bottom, win.innerHeight);
 }
 
 export function flash(el: HTMLElement): void {

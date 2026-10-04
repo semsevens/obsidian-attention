@@ -966,7 +966,8 @@ async function revealInTranscript(app, file, annotation) {
     media.addEventListener("loadedmetadata", seek, { once: true });
   playUntilEndOfSegment(media, starts, at, media.duration);
   void media.play();
-  await flashWhenPainted(document.body, annotation.id, ".mt-transcript");
+  await showMark(document.body, annotation.id, ".mt-transcript", ".mt-transcript", () => {
+  });
 }
 function nonEmpty(items) {
   return items.length > 0 ? items : null;
@@ -1018,10 +1019,8 @@ function segmentStarts(owner) {
 }
 async function revealInMarkdown(app, file, annotation) {
   const line = await lineOfMark(app, file, annotation);
-  const leaf = app.workspace.getLeaf(false);
-  await leaf.openFile(file, line === null ? void 0 : { eState: { scroll: line } });
-  const view = leaf.view;
-  if (!(view instanceof import_obsidian4.MarkdownView))
+  const view = await showNote(app, file, line);
+  if (!view)
     return;
   if (view.getMode() === "source") {
     if (annotation.anchor.kind !== "markdown")
@@ -1033,11 +1032,35 @@ async function revealInMarkdown(app, file, annotation) {
     const from = editor.offsetToPos(at.from);
     const to = editor.offsetToPos(at.to);
     editor.setSelection(from, to);
-    editor.scrollIntoView({ from, to }, true);
-    await flashWhenPainted(view.contentEl, annotation.id, ".cm-content");
+    await showMark(
+      view.contentEl,
+      annotation.id,
+      ".cm-content",
+      ".cm-scroller",
+      () => editor.scrollIntoView({ from, to }, true)
+    );
     return;
   }
-  await flashWhenPainted(view.contentEl, annotation.id, ".markdown-preview-view");
+  await showMark(
+    view.contentEl,
+    annotation.id,
+    ".markdown-preview-view",
+    ".markdown-preview-view",
+    () => {
+      if (line !== null)
+        view.setEphemeralState({ scroll: line });
+    }
+  );
+}
+async function showNote(app, file, line) {
+  const open = app.workspace.getLeavesOfType("markdown").find((leaf2) => leaf2.view instanceof import_obsidian4.MarkdownView && leaf2.view.file === file);
+  if (open) {
+    app.workspace.setActiveLeaf(open, { focus: true });
+    return open.view instanceof import_obsidian4.MarkdownView ? open.view : null;
+  }
+  const leaf = app.workspace.getLeaf(false);
+  await leaf.openFile(file, line === null ? void 0 : { eState: { scroll: line } });
+  return leaf.view instanceof import_obsidian4.MarkdownView ? leaf.view : null;
 }
 async function lineOfMark(app, file, annotation) {
   if (annotation.anchor.kind !== "markdown")
@@ -1050,17 +1073,28 @@ async function lineOfMark(app, file, annotation) {
     return null;
   }
 }
-async function flashWhenPainted(root, id, layer, tries = 20) {
+async function showMark(root, id, layer, scroller, bringNear, tries = 30) {
   for (let i = 0; i < tries; i++) {
+    if (i === 5)
+      bringNear();
     const marks = Array.from(root.querySelectorAll(`${layer} [data-at-id="${id}"]`)).map(asEl).filter((el) => el !== null);
     if (marks.length > 0) {
-      marks[0].scrollIntoView({ behavior: "smooth", block: "center" });
+      const view = asEl(marks[0].closest(scroller));
+      if (!view || !inSight(marks[0], view)) {
+        marks[0].scrollIntoView({ behavior: "smooth", block: "center" });
+      }
       for (const el of marks)
         flash(el);
       return;
     }
     await new Promise((r) => window.setTimeout(r, 50));
   }
+}
+function inSight(el, view) {
+  const mark = el.getBoundingClientRect();
+  const port = view.getBoundingClientRect();
+  const win = el.win;
+  return mark.height > 0 && mark.top >= Math.max(port.top, 0) && mark.bottom <= Math.min(port.bottom, win.innerHeight);
 }
 function flash(el) {
   el.addClass("at-flash");
