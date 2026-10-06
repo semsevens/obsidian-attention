@@ -132,6 +132,26 @@ try {
       { mark: [r.left, r.top, r.right, r.bottom].map(Math.round), selected: [selectedRect.left, selectedRect.top, selectedRect.right, selectedRect.bottom].map(Math.round) });
   }
 
+  // ── A mark quoted before line ends were kept ─────────────────────────────
+  // Such a quote runs the last word of a line into the first of the next. The
+  // mark must still be found and drawn, and its quote put right.
+  const items = main.view.viewer.child.getPage(1).textLayer;
+  const textItems = (items?.textLayer ?? items)?.textContentItems ?? [];
+  const wrap = textItems.findIndex((it, i) => it.hasEOL && it.str.trim() && textItems[i + 1]?.str.trim());
+  expect('the fixture has a line that wraps', wrap >= 0, null);
+  if (wrap >= 0) {
+    const [a, b] = [textItems[wrap].str, textItems[wrap + 1].str];
+    const { annotation: old } = await plugin.store.mark(PATH, {
+      kind: 'pdf', spans: [{ page: 1, selection: [wrap, 0, wrap + 1, b.length] }],
+      quote: a + b, prefix: '', suffix: '',
+    }, null);
+    made.push(old.id);
+    const drawnOld = await waitFor(() => main.view.containerEl.querySelector(`.at-pdf-hl[data-at-id="${old.id}"]`));
+    expect('a mark quoted without its line break is still drawn', drawnOld, null);
+    const repaired = await waitFor(() => plugin.store.peek(PATH).find(x => x.id === old.id)?.anchor.quote.includes('\n'));
+    expect('and its quote is put right', repaired, plugin.store.peek(PATH).find(x => x.id === old.id)?.anchor.quote);
+  }
+
   // ── The review panel ─────────────────────────────────────────────────────
   let panel = app.workspace.getLeavesOfType('attention-review')[0];
   if (!panel) { panel = app.workspace.getRightLeaf(false) ?? app.workspace.getRightLeaf(true); await panel.setViewState({ type: 'attention-review' }); }
@@ -219,6 +239,21 @@ try {
   expect('jumping to a mark on another page brings it into sight', r.inSight && r.positions.length >= 2, r);
   r = await click();
   expect('jumping again to a mark in sight leaves the page alone', r.inSight && r.positions.length === 1, r);
+
+  // The case that reported it: zoomed in, on the mark's own page, scrolled
+  // past it — the mark above the top edge. The page is already the right one;
+  // the jump still has to bring the words back into sight.
+  main.view.viewer.child.pdfViewer.pdfViewer.currentScaleValue = '1.35';
+  await sleep(1200);
+  const farEl = () => main.view.containerEl.querySelector(`.at-pdf-hl[data-at-id="${farMark.id}"]`);
+  await waitFor(farEl);
+  if (farEl()) {
+    scroller().scrollTop += farEl().getBoundingClientRect().bottom - scroller().getBoundingClientRect().top + 80;
+    await sleep(600);
+    r = await click();
+    expect('zoomed in and scrolled past a mark on its own page, the jump brings it back into sight', r.inSight, r);
+  }
+  main.view.viewer.child.pdfViewer.pdfViewer.currentScaleValue = 'auto';
 } finally {
   window.getSelection().removeAllRanges();
   for (const id of made) await plugin.store.remove(PATH, id);

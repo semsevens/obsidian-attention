@@ -15,7 +15,7 @@ import { CommentModal } from '../ui/CommentModal';
 import { asEl } from '../dom';
 import { claimMenu, onLongPress } from '../ui/touch';
 import { describeMark } from '../store/describeMark';
-import { readable } from '../anchor/cjk';
+import { readable, readablePdf } from '../anchor/cjk';
 import { preferredTrack, tracksFor } from '../hosts/transcript/trackFor';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
@@ -273,7 +273,7 @@ export class ReviewView extends ItemView {
       const thumb = el.createDiv('at-thumb at-thumb-pdf');
       const embed = `![[${targetPath}#page=${page}&rect=${rect.map(v => Math.round(v)).join(',')}]]`;
       void MarkdownRenderer.render(this.app, embed, thumb, targetPath, this);
-      if (anchor.quote) el.createDiv('at-quote at-quote-region').setText(readable(anchor.quote));
+      if (anchor.quote) el.createDiv('at-quote at-quote-region').setText(readablePdf(anchor.quote));
     } else if (isImageQuote(annotation.anchor.quote)) {
       // Render the embed through Obsidian rather than resolving a URL here.
       // Whatever the note shows, this shows: a plugin that swaps remote
@@ -282,7 +282,9 @@ export class ReviewView extends ItemView {
       const thumb = el.createDiv('at-thumb');
       void MarkdownRenderer.render(this.app, annotation.anchor.quote, thumb, targetPath, this);
     } else {
-      el.createDiv('at-quote').setText(readable(annotation.anchor.quote));
+      el.createDiv('at-quote').setText(
+        anchor.kind === 'pdf' ? readablePdf(anchor.quote) : readable(anchor.quote),
+      );
     }
     if (isComment(annotation)) {
       el.createDiv('at-body').setText(annotation.body ?? '');
@@ -378,7 +380,7 @@ export class ReviewView extends ItemView {
     menu.addItem(i => i.setTitle('Re-attach to selection').setIcon('link')
       .onClick(() => { void this.reattach(targetPath, annotation); }));
     menu.addItem(i => i.setTitle('Copy text').setIcon('copy')
-      .onClick(() => { void navigator.clipboard.writeText(readable(annotation.anchor.quote)); }));
+      .onClick(() => { void navigator.clipboard.writeText(annotation.anchor.kind === 'pdf' ? readablePdf(annotation.anchor.quote) : readable(annotation.anchor.quote)); }));
     menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
       .onClick(() => { void this.plugin.store.remove(targetPath, annotation.id); }));
     menu.showAtPosition(at);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { describePdf, pageText, resolveSpan, spanText, textInRect, toOffsets, toSelection } from '../src/anchor/pdfText';
-import { readable } from '../src/anchor/cjk';
+import { describePdf, itemTexts, pageText, resolveSpan, spanText, textInRect, toOffsets, toSelection } from '../src/anchor/pdfText';
+import { readable, readablePdf } from '../src/anchor/cjk';
 import { sameSpot, PdfAnchor } from '../src/model';
 
 // Items as pdf.js extracted them from the fixture PDF (fixtures/vault/注意力笔记.pdf),
@@ -138,5 +138,29 @@ describe('sameSpot for PDF regions', () => {
   it('is another region on another page or in another place', () => {
     expect(sameSpot(region(3, [80, 450, 400, 620]), region(4, [80, 450, 400, 620]))).toBe(false);
     expect(sameSpot(region(3, [80, 450, 400, 620]), region(3, [90, 450, 400, 620]))).toBe(false);
+  });
+});
+
+describe('line ends', () => {
+  // As pdf.js gave them for the mark that reported this: "each repository
+  // removes something" at the end of one line, "until only…" starting the next.
+  const items = itemTexts([
+    { str: 'consistent rule: each repository removes something', hasEOL: true },
+    { str: 'until only the mechanism is left.' },
+  ]);
+
+  it('keeps a break between items that end a line', () => {
+    expect(spanText(items, [0, 17, 1, 33])).toBe('each repository removes something\nuntil only the mechanism is left.');
+  });
+
+  it('still finds a mark quoted before line ends were kept', () => {
+    const span = { page: 3, selection: [0, 17, 1, 33] as [number, number, number, number] };
+    expect(resolveSpan(items, span, 'each repository removes somethinguntil only the mechanism is left.', '', ''))
+      .toEqual([0, 17, 1, 33]);
+  });
+
+  it('reads a wrapped line as a space in English and as nothing in Chinese', () => {
+    expect(readablePdf('removes something\nuntil only')).toBe('removes something until only');
+    expect(readablePdf('注意⼒是稀缺\n资源')).toBe('注意力是稀缺资源');
   });
 });

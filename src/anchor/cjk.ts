@@ -35,3 +35,18 @@ export function readable(text: string): string {
     .replace(KANGXI, c => c.normalize('NFKC'))
     .replace(RADICAL, c => SUPPLEMENT[c] ?? c);
 }
+
+/** A character of a script written without spaces between words. */
+const UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]/u;
+
+/**
+ * A PDF passage made readable: radicals turned into characters, and the line
+ * breaks of the page — which are where the PDF happened to wrap, not where the
+ * writer put them — read as the space between two words, or as nothing
+ * between two Chinese characters.
+ */
+export function readablePdf(text: string): string {
+  return readable(text).replace(/(.)\n(?=(.))/gu, (_, before: string, after: string) =>
+    UNSPACED.test(before) && UNSPACED.test(after) ? before : `${before} `,
+  );
+}

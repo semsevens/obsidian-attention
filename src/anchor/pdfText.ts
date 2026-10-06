@@ -113,7 +113,8 @@ export function resolveSpan(
   prefix: string,
   suffix: string,
 ): Selection | null {
-  if (spanText(items, span.selection) === quote) return span.selection;
+  const stored = spanText(items, span.selection);
+  if (stored !== null && sameText(stored, quote)) return span.selection;
   const text = pageText(items);
   const hint = toOffsets(items, span.selection);
   const found = resolve(text, {
@@ -127,6 +128,8 @@ export function resolveSpan(
 /** A text item as pdf.js gives it: where it sits, as well as what it says. */
 export interface PlacedItem {
   str: string;
+  /** The item ends its line: pdf.js draws a line break after it, not a character. */
+  hasEOL?: boolean;
   /** [a, b, c, d, e, f]: e and f are where the item's baseline starts. */
   transform?: number[];
   width?: number;
@@ -149,4 +152,27 @@ export function textInRect(items: readonly PlacedItem[], [x1, y1, x2, y2]: reado
     return x >= Math.min(x1, x2) && x <= Math.max(x1, x2) && y >= Math.min(y1, y2) && y <= Math.max(y1, y2);
   });
   return inside.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The items' text as a reader selects it: each with a line break after it if
+ * it ends a line.
+ *
+ * pdf.js keeps a line's end out of the item's text and draws it as a break
+ * after the item. Joined without it, the last word of one line runs into the
+ * first of the next — "something" and "until" become "somethinguntil". The
+ * break goes at the end of the item, so offsets within its own text are
+ * unchanged and stay what PDF++ reads them as.
+ */
+export function itemTexts(items: readonly PlacedItem[]): string[] {
+  return items.map(i => (i.hasEOL ? i.str + '\n' : i.str));
+}
+
+/**
+ * Whether two quotes are the same words, line breaks aside.
+ *
+ * Quotes made before line ends were kept have none; the words are the same.
+ */
+export function sameText(a: string, b: string): boolean {
+  return a.replace(/\n/g, '') === b.replace(/\n/g, '');
 }

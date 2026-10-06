@@ -1187,7 +1187,7 @@ async function revealInPdf(app, file, annotation) {
   await showMark(view.containerEl, annotation.id, ".page", ".pdf-viewer-container", () => {
     var _a, _b;
     (_b = (_a = childOf(view)) == null ? void 0 : _a.pdfViewer.pdfViewer) == null ? void 0 : _b.scrollPageIntoView({ pageNumber: page });
-  });
+  }, 100);
 }
 async function lineOfMark(app, file, annotation) {
   if (annotation.anchor.kind !== "markdown")
@@ -1415,13 +1415,20 @@ function readable(text) {
     return (_a = SUPPLEMENT[c]) != null ? _a : c;
   });
 }
+var UNSPACED = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\u3000-\u303F\uFF00-\uFFEF]/u;
+function readablePdf(text) {
+  return readable(text).replace(
+    /(.)\n(?=(.))/gu,
+    (_, before, after) => UNSPACED.test(before) && UNSPACED.test(after) ? before : `${before} `
+  );
+}
 
 // src/store/describeMark.ts
 function describeMark(annotation, options) {
   var _a;
   const { anchor } = annotation;
   const lines = [];
-  const quote = readable(anchor.quote) || (anchor.kind === "pdf" && anchor.region ? `(a region of page ${anchor.region.page})` : "");
+  const quote = (anchor.kind === "pdf" ? readablePdf(anchor.quote) : readable(anchor.quote)) || (anchor.kind === "pdf" && anchor.region ? `(a region of page ${anchor.region.page})` : "");
   for (const line of quote.split("\n"))
     lines.push(`> ${line}`);
   if (isComment(annotation)) {
@@ -1710,12 +1717,14 @@ var ReviewView = class extends import_obsidian6.ItemView {
       const embed = `![[${targetPath}#page=${page}&rect=${rect.map((v) => Math.round(v)).join(",")}]]`;
       void import_obsidian6.MarkdownRenderer.render(this.app, embed, thumb, targetPath, this);
       if (anchor.quote)
-        el.createDiv("at-quote at-quote-region").setText(readable(anchor.quote));
+        el.createDiv("at-quote at-quote-region").setText(readablePdf(anchor.quote));
     } else if (isImageQuote(annotation.anchor.quote)) {
       const thumb = el.createDiv("at-thumb");
       void import_obsidian6.MarkdownRenderer.render(this.app, annotation.anchor.quote, thumb, targetPath, this);
     } else {
-      el.createDiv("at-quote").setText(readable(annotation.anchor.quote));
+      el.createDiv("at-quote").setText(
+        anchor.kind === "pdf" ? readablePdf(anchor.quote) : readable(anchor.quote)
+      );
     }
     if (isComment(annotation)) {
       el.createDiv("at-body").setText((_a = annotation.body) != null ? _a : "");
@@ -1818,7 +1827,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
       void this.reattach(targetPath, annotation);
     }));
     menu.addItem((i) => i.setTitle("Copy text").setIcon("copy").onClick(() => {
-      void navigator.clipboard.writeText(readable(annotation.anchor.quote));
+      void navigator.clipboard.writeText(annotation.anchor.kind === "pdf" ? readablePdf(annotation.anchor.quote) : readable(annotation.anchor.quote));
     }));
     menu.addItem((i) => i.setTitle("Remove mark").setIcon("trash").setWarning(true).onClick(() => {
       void this.plugin.store.remove(targetPath, annotation.id);
@@ -3968,7 +3977,8 @@ function describePdf(spans, pages) {
 }
 function resolveSpan(items, span, quote, prefix, suffix) {
   var _a, _b;
-  if (spanText(items, span.selection) === quote)
+  const stored = spanText(items, span.selection);
+  if (stored !== null && sameText(stored, quote))
     return span.selection;
   const text = pageText(items);
   const hint = toOffsets(items, span.selection);
@@ -3992,6 +4002,12 @@ function textInRect(items, [x1, y1, x2, y2]) {
     return x >= Math.min(x1, x2) && x <= Math.max(x1, x2) && y >= Math.min(y1, y2) && y <= Math.max(y1, y2);
   });
   return inside.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim();
+}
+function itemTexts(items) {
+  return items.map((i) => i.hasEOL ? i.str + "\n" : i.str);
+}
+function sameText(a, b) {
+  return a.replace(/\n/g, "") === b.replace(/\n/g, "");
 }
 
 // src/hosts/pdf/PdfHost.ts
@@ -4119,7 +4135,7 @@ var PdfHost = class {
     const info = textLayerOf(view);
     if (!lib || !info)
       return;
-    const items = info.textContentItems.map((i) => i.str);
+    const items = itemTexts(info.textContentItems);
     for (const a of this.store.peek(path)) {
       if (a.anchor.kind !== "pdf")
         continue;
@@ -4136,6 +4152,7 @@ var PdfHost = class {
         const selection = this.locate(items, anchor, k);
         if (!selection)
           return;
+        this.refreshQuote(path, a, page, items, selection);
         for (const rect of lib.rects(info, selection)) {
           const el = lib.place(rect, view);
           el.className = "at-hl at-pdf-hl" + cls;
@@ -4143,6 +4160,25 @@ var PdfHost = class {
         }
       });
     }
+  }
+  /**
+   * Bring a one-page mark's stored quote up to date with its page's text.
+   *
+   * Marks made before line ends were kept read "somethinguntil" where the page
+   * says "something" and, on the next line, "until". The words are the same,
+   * so the mark is found; the quote is rewritten the first time its page is
+   * drawn, and reads properly from then on.
+   */
+  refreshQuote(path, a, page, items, selection) {
+    const anchor = a.anchor;
+    if (anchor.kind !== "pdf" || anchor.spans.length !== 1)
+      return;
+    const fresh = describePdf([{ page, selection }], /* @__PURE__ */ new Map([[page, items]]));
+    if (!fresh || fresh.quote === anchor.quote)
+      return;
+    void this.store.update(path, a.id, {
+      anchor: { ...anchor, ...fresh, spans: [{ page, selection }] }
+    });
   }
   /** Where span `k` of an anchor sits among these items now, if anywhere. */
   locate(items, anchor, k) {
@@ -4204,7 +4240,7 @@ var PdfHost = class {
       const at = part && lib.selectionIn(view.div, part);
       if (!at)
         continue;
-      const items = info.textContentItems.map((i) => i.str);
+      const items = itemTexts(info.textContentItems);
       if (!((_a = spanText(items, at)) == null ? void 0 : _a.trim()))
         continue;
       pages.set(page, items);
@@ -4416,7 +4452,7 @@ function lastText(el) {
   return last;
 }
 function quoteOf(anchor) {
-  const text = readable(anchor.quote);
+  const text = readablePdf(anchor.quote);
   return text || `Region on page ${pdfPage(anchor)}`;
 }
 

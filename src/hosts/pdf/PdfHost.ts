@@ -6,8 +6,8 @@ import { SelectionPopover } from '../../ui/SelectionPopover';
 import { CommentBubble } from '../../ui/CommentBubble';
 import { CommentModal } from '../../ui/CommentModal';
 import { asEl, elementOf } from '../../dom';
-import { describePdf, resolveSpan, spanText, textInRect } from '../../anchor/pdfText';
-import { readable } from '../../anchor/cjk';
+import { describePdf, itemTexts, resolveSpan, spanText, textInRect } from '../../anchor/pdfText';
+import { readable, readablePdf } from '../../anchor/cjk';
 import { childOf, PageView, PdfChild, PdfPlus, pdfPlus, Rect, textLayerOf, TextLayerInfo } from './pdfPlus';
 
 /**
@@ -141,7 +141,7 @@ export class PdfHost {
     view.div.querySelectorAll('.at-pdf-hl').forEach(el => el.remove());
     const info = textLayerOf(view);
     if (!lib || !info) return;
-    const items = info.textContentItems.map(i => i.str);
+    const items = itemTexts(info.textContentItems);
 
     for (const a of this.store.peek(path)) {
       if (a.anchor.kind !== 'pdf') continue;
@@ -156,6 +156,7 @@ export class PdfHost {
         if (span.page !== page) return;
         const selection = this.locate(items, anchor, k);
         if (!selection) return;
+        this.refreshQuote(path, a, page, items, selection);
         for (const rect of lib.rects(info, selection)) {
           const el = lib.place(rect, view);
           // Not PDF++'s classes: those carry its own hover and click handling,
@@ -165,6 +166,30 @@ export class PdfHost {
         }
       });
     }
+  }
+
+  /**
+   * Bring a one-page mark's stored quote up to date with its page's text.
+   *
+   * Marks made before line ends were kept read "somethinguntil" where the page
+   * says "something" and, on the next line, "until". The words are the same,
+   * so the mark is found; the quote is rewritten the first time its page is
+   * drawn, and reads properly from then on.
+   */
+  private refreshQuote(
+    path: string,
+    a: Annotation,
+    page: number,
+    items: string[],
+    selection: PdfSpan['selection'],
+  ): void {
+    const anchor = a.anchor;
+    if (anchor.kind !== 'pdf' || anchor.spans.length !== 1) return;
+    const fresh = describePdf([{ page, selection }], new Map([[page, items]]));
+    if (!fresh || fresh.quote === anchor.quote) return;
+    void this.store.update(path, a.id, {
+      anchor: { ...anchor, ...fresh, spans: [{ page, selection }] },
+    });
   }
 
   /** Where span `k` of an anchor sits among these items now, if anywhere. */
@@ -224,7 +249,7 @@ export class PdfHost {
       const part = this.partOn(info, range, page === first, page === last);
       const at = part && lib.selectionIn(view.div, part);
       if (!at) continue;
-      const items = info.textContentItems.map(i => i.str);
+      const items = itemTexts(info.textContentItems);
       if (!spanText(items, at)?.trim()) continue;
       pages.set(page, items);
       spans.push({ page, selection: at });
@@ -419,6 +444,6 @@ function lastText(el: Node): Text | null {
 
 /** What to show of a PDF mark in words: its text, or where a wordless region is. */
 function quoteOf(anchor: PdfAnchor): string {
-  const text = readable(anchor.quote);
+  const text = readablePdf(anchor.quote);
   return text || `Region on page ${pdfPage(anchor)}`;
 }

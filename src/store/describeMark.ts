@@ -8,7 +8,7 @@
  */
 
 import { Annotation, isComment } from '../model';
-import { readable } from '../anchor/cjk';
+import { readable, readablePdf } from '../anchor/cjk';
 
 export interface Described {
   /** What to put on the clipboard. */
@@ -31,7 +31,7 @@ export function describeMark(annotation: Annotation, options: DescribeOptions): 
   // The quote first and as a blockquote: pasted into a note it should read as
   // the passage it is, not as a field in a record.
   // A region of a PDF may have no words in it; say what it is instead.
-  const quote = readable(anchor.quote) ||
+  const quote = (anchor.kind === 'pdf' ? readablePdf(anchor.quote) : readable(anchor.quote)) ||
     (anchor.kind === 'pdf' && anchor.region ? `(a region of page ${anchor.region.page})` : '');
   for (const line of quote.split('\n')) lines.push(`> ${line}`);
 

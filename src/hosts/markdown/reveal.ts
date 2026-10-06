@@ -225,9 +225,13 @@ async function revealInPdf(app: App, file: TFile, annotation: Annotation): Promi
     await leaf.openFile(file, { eState: { subpath: `#page=${page}` } });
   }
   const view = leaf.view;
+  // Up to five seconds, where a note gets one and a half: a page is drawn a
+  // canvas at a time, and a long PDF at a large zoom in a busy vault can take
+  // well over a second to put its text down. Giving up sooner left the page
+  // turned and the mark somewhere below it.
   await showMark(view.containerEl, annotation.id, '.page', '.pdf-viewer-container', () => {
     childOf(view)?.pdfViewer.pdfViewer?.scrollPageIntoView({ pageNumber: page });
-  });
+  }, 100);
 }
 
 /** The line the mark sits on now, or null if it cannot be placed. */
