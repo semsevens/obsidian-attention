@@ -1,4 +1,5 @@
-import { App, MarkdownView, TFile } from 'obsidian';
+import { App, FileView, MarkdownView, TFile } from 'obsidian';
+import { childOf } from '../pdf/pdfPlus';
 import { Annotation } from '../../model';
 import { resolveMarkdown } from '../../anchor/resolveAnchor';
 import { asEl, asMedia } from '../../dom';
@@ -11,11 +12,15 @@ import { lineOf, lineStarts } from '../../anchor/lines';
  * Each host needs different treatment. A markdown editor can be told to select
  * a character range; reading mode has no offsets and must be found by the
  * `data-at-id` stamped on the painted span; a transcript needs the *player*
- * moved, which is the whole point of marking one.
+ * moved, which is the whole point of marking one; a PDF needs its page.
  */
 export async function reveal(app: App, file: TFile, annotation: Annotation): Promise<void> {
   if (annotation.anchor.kind === 'transcript') {
     await revealInTranscript(app, file, annotation);
+    return;
+  }
+  if (annotation.anchor.kind === 'pdf') {
+    await revealInPdf(app, file, annotation);
     return;
   }
   await revealInMarkdown(app, file, annotation);
@@ -181,6 +186,29 @@ async function showNote(app: App, file: TFile, line: number | null): Promise<Mar
   const leaf = app.workspace.getLeaf(false);
   await leaf.openFile(file, line === null ? undefined : { eState: { scroll: line } });
   return leaf.view instanceof MarkdownView ? leaf.view : null;
+}
+
+/**
+ * Turn to the page and show the mark there, the same way as in a note: the PDF
+ * already open is switched to, and the page moves only if the mark is out of
+ * sight. Pages are drawn as they come near, so an unseen mark is brought near
+ * by turning to its page first.
+ */
+async function revealInPdf(app: App, file: TFile, annotation: Annotation): Promise<void> {
+  if (annotation.anchor.kind !== 'pdf') return;
+  const page = annotation.anchor.spans[0]?.page ?? 1;
+
+  let leaf = app.workspace.getLeavesOfType('pdf').find(l => (l.view as FileView).file === file);
+  if (leaf) {
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+  } else {
+    leaf = app.workspace.getLeaf(false);
+    await leaf.openFile(file, { eState: { subpath: `#page=${page}` } });
+  }
+  const view = leaf.view;
+  await showMark(view.containerEl, annotation.id, '.page', '.pdf-viewer-container', () => {
+    childOf(view)?.pdfViewer.pdfViewer?.scrollPageIntoView({ pageNumber: page });
+  });
 }
 
 /** The line the mark sits on now, or null if it cannot be placed. */

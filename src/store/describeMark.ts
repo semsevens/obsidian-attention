@@ -8,6 +8,7 @@
  */
 
 import { Annotation, isComment } from '../model';
+import { readable } from '../anchor/cjk';
 
 export interface Described {
   /** What to put on the clipboard. */
@@ -29,7 +30,7 @@ export function describeMark(annotation: Annotation, options: DescribeOptions): 
 
   // The quote first and as a blockquote: pasted into a note it should read as
   // the passage it is, not as a field in a record.
-  for (const line of anchor.quote.split('\n')) lines.push(`> ${line}`);
+  for (const line of readable(anchor.quote).split('\n')) lines.push(`> ${line}`);
 
   if (isComment(annotation)) {
     lines.push('');
@@ -41,6 +42,10 @@ export function describeMark(annotation: Annotation, options: DescribeOptions): 
 
   if (anchor.kind === 'transcript' && options.clock) {
     lines.push(`At: ${options.clock(anchor.start)}`);
+  }
+  if (anchor.kind === 'pdf' && anchor.spans.length > 0) {
+    const pages = [...new Set(anchor.spans.map(s => s.page))];
+    lines.push(pages.length === 1 ? `Page: ${pages[0]}` : `Pages: ${pages[0]}–${pages[pages.length - 1]}`);
   }
 
   const times = annotation.hits.map(options.when);

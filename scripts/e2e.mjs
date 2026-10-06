@@ -8,8 +8,8 @@
 // scripts/e2e/fuzz.js and reports what came back. The vault has to be open in
 // Obsidian: `open "obsidian://open?vault=<its folder name>"`.
 //
-// Then scripts/e2e/reveal.js: clicking a record in the review panel, which
-// should scroll only when the mark is out of sight.
+// Then the checks in CHECKS below: one feature each, driven through the app —
+// jumping to a mark from the review panel, marking a PDF through PDF++.
 //
 // Unit tests cover what each piece does with the DOM it is given; this covers
 // whether that DOM is what Obsidian actually draws, which no fixture can.
@@ -110,18 +110,27 @@ for (const row of result.value) {
 }
 for (const e of result.errors) console.log("  console error:", e.slice(0, 300));
 
-// Going to a mark from the review panel: in sight, in one move, and not at all
-// when it already is. Needs the fixture note, so only in the fixtures vault.
-const reveal = await probe(readFileSync(new URL("./e2e/reveal.js", import.meta.url), "utf8"), 120);
-if (!reveal?.ok) {
-  failures++;
-  console.log("✗ jumping to a mark:", reveal?.error ?? "no answer");
-} else if (reveal.value.skipped) {
-  console.log(`- jumping to a mark: skipped (${reveal.value.skipped})`);
-} else {
-  failures += reveal.value.failures.length;
-  console.log(`${reveal.value.failures.length ? "✗" : "✓"} jumping to a mark from the review panel`);
-  for (const f of reveal.value.failures) console.log("    ", JSON.stringify(f));
+// Checks that drive one feature through the app, each with its own fixture —
+// so only in the fixtures vault; elsewhere they say they were skipped.
+const CHECKS = [
+  // Going to a mark from the review panel: in sight, in one move, and not at
+  // all when it already is.
+  ["jumping to a mark from the review panel", "reveal.js"],
+  // Marks on a PDF, through PDF++: captured, drawn, across pages, jumped to.
+  ["marks on a PDF", "pdf.js"],
+];
+for (const [name, script] of CHECKS) {
+  const check = await probe(readFileSync(new URL(`./e2e/${script}`, import.meta.url), "utf8"), 300);
+  if (!check?.ok) {
+    failures++;
+    console.log(`✗ ${name}:`, check?.error ?? "no answer");
+  } else if (check.value.skipped) {
+    console.log(`- ${name}: skipped (${check.value.skipped})`);
+  } else {
+    failures += check.value.failures.length;
+    console.log(`${check.value.failures.length ? "✗" : "✓"} ${name}`);
+    for (const f of check.value.failures.slice(0, 5)) console.log("    ", JSON.stringify(f).slice(0, 400));
+  }
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall passed");

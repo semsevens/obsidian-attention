@@ -30,7 +30,19 @@ export default class DebugAttentionPlugin extends AttentionPlugin {
     const outbox = `${this.manifest.dir}/probe-out.json`;
     if (this.probing || !(await adapter.exists(inbox))) return;
     this.probing = true;
+    // Whatever happens below — the runner deleting a file between our check
+    // and our remove, say — the bridge must be free for the next script, or it
+    // goes silent until the plugin is reloaded.
+    try {
+      await this.answer(adapter, inbox, outbox);
+    } catch (e) {
+      console.error("attention debug bridge:", e);
+    } finally {
+      this.probing = false;
+    }
+  }
 
+  async answer(adapter, inbox, outbox) {
     const notices = [];
     const errors = [];
     const watcher = new MutationObserver(records => {
@@ -50,7 +62,7 @@ export default class DebugAttentionPlugin extends AttentionPlugin {
     let result;
     try {
       const code = await adapter.read(inbox);
-      await adapter.remove(inbox);
+      await adapter.remove(inbox).catch(() => {});
       const fn = new Function("app", "plugin", `return (async () => {\n${code}\n})();`);
       result = { ok: true, value: await fn(this.app, this) };
     } catch (e) {
@@ -62,8 +74,7 @@ export default class DebugAttentionPlugin extends AttentionPlugin {
     // Written aside and renamed into place, so a reader never sees half of it.
     const partial = `${outbox}.partial`;
     await adapter.write(partial, JSON.stringify({ ...result, notices, errors }, null, 2));
-    if (await adapter.exists(outbox)) await adapter.remove(outbox);
+    await adapter.remove(outbox).catch(() => {});
     await adapter.rename(partial, outbox);
-    this.probing = false;
   }
 }

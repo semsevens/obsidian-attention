@@ -18,8 +18,10 @@ export async function inDocumentOrder(
 ): Promise<Annotation[]> {
   if (annotations.length === 0) return [];
 
-  let source = text;
-  if (source === undefined) {
+  // Only a note's position needs its text: a PDF's is in the anchor, and
+  // reading a PDF as text would load megabytes to throw away.
+  let source = text ?? '';
+  if (text === undefined && file.extension === 'md') {
     try {
       source = await app.vault.cachedRead(file);
     } catch {
@@ -29,7 +31,7 @@ export async function inDocumentOrder(
 
   const positioned = annotations.map(a => ({
     a,
-    at: a.anchor.kind === 'markdown' ? resolveMarkdown(source, a.anchor)?.from ?? null : null,
+    at: positionOf(a, source),
   }));
 
   return positioned
@@ -40,4 +42,19 @@ export async function inDocumentOrder(
       return x.at - y.at;
     })
     .map(p => p.a);
+}
+
+/**
+ * Where a mark sits, as one number to sort by: its offset in a note, or its
+ * page, item and character in a PDF — which has no single offset of its own.
+ */
+function positionOf(a: Annotation, source: string): number | null {
+  if (a.anchor.kind === 'markdown') return resolveMarkdown(source, a.anchor)?.from ?? null;
+  if (a.anchor.kind === 'pdf') {
+    const span = a.anchor.spans[0];
+    if (!span) return null;
+    const [item, offset] = span.selection;
+    return span.page * 1e9 + item * 1e4 + Math.min(offset, 9999);
+  }
+  return null;
 }

@@ -37,6 +37,8 @@ export interface AttentionSettings extends ViewModeSettings {
   enableMarkdownHost: boolean;
   /** Annotate the Media Transcript plugin's transcript panel. */
   enableTranscriptHost: boolean;
+  /** Annotate PDFs, through PDF++. */
+  enablePdfHost: boolean;
 
   /**
    * Count how often a transcript segment gets replayed. Implicit attention —
@@ -67,6 +69,7 @@ export const DEFAULT_SETTINGS: AttentionSettings = {
   popoverOnSelection: true,
   enableMarkdownHost: true,
   enableTranscriptHost: true,
+  enablePdfHost: true,
   trackReplays: false,
   autoRevealPanel: true,
   resurfaceCount: 10,
@@ -225,6 +228,19 @@ export class AttentionSettingTab extends PluginSettingTab {
       .addToggle(t =>
         t.setValue(this.plugin.settings.enableTranscriptHost).onChange(async v => {
           this.plugin.settings.enableTranscriptHost = v;
+          await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('PDF files')
+      .setDesc(
+        'Highlight and comment on PDFs, drawn and selected through PDF++. The PDF itself ' +
+          'is never modified. Has no effect if PDF++ is not installed.',
+      )
+      .addToggle(t =>
+        t.setValue(this.plugin.settings.enablePdfHost).onChange(async v => {
+          this.plugin.settings.enablePdfHost = v;
           await this.plugin.saveSettings();
         }),
       );

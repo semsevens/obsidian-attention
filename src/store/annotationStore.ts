@@ -225,7 +225,11 @@ async function repairOnLoad(
   data: AnnotationFile,
 ): Promise<{ data: AnnotationFile; changed: boolean }> {
   const file = app.vault.getAbstractFileByPath(data.target);
-  if (!(file instanceof TFile) || data.annotations.length === 0) return { data, changed: false };
+  // Only notes are edited out from under their marks; anything else read as
+  // text here would be a recording or a PDF, loaded whole for nothing.
+  if (!(file instanceof TFile) || file.extension !== 'md' || data.annotations.length === 0) {
+    return { data, changed: false };
+  }
 
   let source: string;
   try {

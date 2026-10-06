@@ -3,5 +3,6 @@
   "attention",
   "hot-reload",
   "archive-redirect",
-  "asciinema-player"
+  "asciinema-player",
+  "pdf-plus"
 ]

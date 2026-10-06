@@ -175,6 +175,27 @@ body.at-style-background .at-hl:hover {
   box-shadow: none;
 }
 
+/* On a PDF, a mark is a rectangle PDF++ placed over the text, in a layer of
+   its own above the page. The pointer passes through it so the text beneath
+   still selects; the host finds a mark under a click by position instead. The
+   fill blends with the page rather than covering it. */
+.pdf-plus-backlink-highlight-layer .at-pdf-hl {
+  position: absolute;
+  pointer-events: none;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--at-color, #f5c542) 38%, transparent);
+  mix-blend-mode: multiply;
+  border-radius: 2px;
+}
+
+.theme-dark .pdf-plus-backlink-highlight-layer .at-pdf-hl {
+  mix-blend-mode: screen;
+}
+
+.pdf-plus-backlink-highlight-layer .at-pdf-hl.at-hl-comment {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 55%, transparent);
+}
+
 /* Make selection unmistakable either way. */
 .at-hl::selection {
   background: var(--text-selection);

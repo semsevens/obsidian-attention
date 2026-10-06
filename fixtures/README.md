@@ -9,8 +9,8 @@ echo "$PWD/fixtures/vault" > .dev-vault
 ```
 
 Its settings are kept here; the plugins it uses are not (they are other
-people's code) — install Hot Reload, Media Transcript, Archive Redirect and
-Asciinema Player into it once. Marks made while testing (`*.anno.json`) and
+people's code) — install Hot Reload, Media Transcript, Archive Redirect,
+Asciinema Player and PDF++ into it once. Marks made while testing (`*.anno.json`) and
 recordings (`录音/`) are ignored.
 
 ## End to end
@@ -54,6 +54,7 @@ Each one exists for a case that has broken at least once:
 | `选区-脚注.md` | footnotes, which Obsidian renumbers and gathers at the end while recording that section as the note's last line |
 | `选区-插件渲染.md` | a block another plugin draws (Asciinema Player): its text on screen is not in the file at all |
 | `属性选区.md` | a description that repeats the first sentence, so the properties table shows it twice more |
+| `注意力笔记.pdf` | three pages of Chinese and English, printed to PDF from HTML by Chrome — which, like most macOS PDF output, stores some characters as radicals (`⼒` for 力). A phrase repeats on every page, and a paragraph ends one page where the next begins another |
 | `跨段.md` | a clipped-article opening: byline, image with a caption on its line, paragraphs and a list to drag across |
 
 Every row above is a case that has been wrong at some point. The image ones are

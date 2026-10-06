@@ -4,8 +4,8 @@
 
 import type { TextAnchor } from './anchor/textQuote';
 
-// Both hosts anchor the same way — a quote plus context — so they share the
-// shape defined next to the resolver that consumes it.
+// Every host anchors the same way underneath — a quote plus context — so they
+// share the shape defined next to the resolver that consumes it.
 export type QuoteContext = Pick<TextAnchor, 'quote' | 'prefix' | 'suffix'>;
 
 /**
@@ -43,7 +43,30 @@ export type MarkdownAnchor = TextAnchor & {
   imageHint?: string;
 };
 
-export type Anchor = TranscriptAnchor | MarkdownAnchor;
+/**
+ * Where a passage sits on one page of a PDF, in Obsidian's own terms: the
+ * `selection=` of a `#page=…&selection=…` link, which PDF++ reads and writes.
+ * Indices are into the page's text items as pdf.js extracts them, so they do
+ * not move with zoom or re-rendering — and a PDF, unlike a note, isn't edited.
+ */
+export interface PdfSpan {
+  /** 1-based, as in `#page=`. */
+  page: number;
+  /** beginIndex, beginOffset, endIndex, endOffset. */
+  selection: [number, number, number, number];
+}
+
+/**
+ * A spot inside a PDF. A passage can run across pages; each page it touches is
+ * a span of its own, in order. The quote is what those spans read, joined by
+ * newlines, and is kept so a mark can be checked — and shown — without the PDF.
+ */
+export interface PdfAnchor extends QuoteContext {
+  kind: 'pdf';
+  spans: PdfSpan[];
+}
+
+export type Anchor = TranscriptAnchor | MarkdownAnchor | PdfAnchor;
 
 export interface Annotation {
   id: string;
@@ -129,6 +152,13 @@ export function sameSpot(a: Anchor, b: Anchor): boolean {
   }
   if (a.kind === 'transcript' && b.kind === 'transcript') {
     return a.seg === b.seg || Math.abs(a.start - b.start) < 0.5;
+  }
+  if (a.kind === 'pdf' && b.kind === 'pdf') {
+    // The same quote starting at the same place on the same page. A repeated
+    // phrase elsewhere on the page starts somewhere else.
+    const [x, y] = [a.spans[0], b.spans[0]];
+    return !!x && !!y && x.page === y.page &&
+      x.selection[0] === y.selection[0] && x.selection[1] === y.selection[1];
   }
   return false;
 }

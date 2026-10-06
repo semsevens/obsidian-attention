@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => AttentionPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian14 = require("obsidian");
+var import_obsidian15 = require("obsidian");
 
 // src/settings.ts
 var import_obsidian2 = require("obsidian");
@@ -57,6 +57,7 @@ var DEFAULT_SETTINGS = {
   popoverOnSelection: true,
   enableMarkdownHost: true,
   enableTranscriptHost: true,
+  enablePdfHost: true,
   trackReplays: false,
   autoRevealPanel: true,
   resurfaceCount: 10,
@@ -164,6 +165,14 @@ var AttentionSettingTab = class extends import_obsidian2.PluginSettingTab {
     ).addToggle(
       (t) => t.setValue(this.plugin.settings.enableTranscriptHost).onChange(async (v) => {
         this.plugin.settings.enableTranscriptHost = v;
+        await this.plugin.saveSettings();
+      })
+    );
+    new import_obsidian2.Setting(containerEl).setName("PDF files").setDesc(
+      "Highlight and comment on PDFs, drawn and selected through PDF++. The PDF itself is never modified. Has no effect if PDF++ is not installed."
+    ).addToggle(
+      (t) => t.setValue(this.plugin.settings.enablePdfHost).onChange(async (v) => {
+        this.plugin.settings.enablePdfHost = v;
         await this.plugin.saveSettings();
       })
     );
@@ -290,6 +299,10 @@ function sameSpot(a, b) {
   }
   if (a.kind === "transcript" && b.kind === "transcript") {
     return a.seg === b.seg || Math.abs(a.start - b.start) < 0.5;
+  }
+  if (a.kind === "pdf" && b.kind === "pdf") {
+    const [x, y] = [a.spans[0], b.spans[0]];
+    return !!x && !!y && x.page === y.page && x.selection[0] === y.selection[0] && x.selection[1] === y.selection[1];
   }
   return false;
 }
@@ -803,21 +816,18 @@ function resolveMarkdown(text, anchor) {
 async function inDocumentOrder(app, file, annotations, text) {
   if (annotations.length === 0)
     return [];
-  let source = text;
-  if (source === void 0) {
+  let source = text != null ? text : "";
+  if (text === void 0 && file.extension === "md") {
     try {
       source = await app.vault.cachedRead(file);
     } catch (e) {
       return [...annotations];
     }
   }
-  const positioned = annotations.map((a) => {
-    var _a, _b;
-    return {
-      a,
-      at: a.anchor.kind === "markdown" ? (_b = (_a = resolveMarkdown(source, a.anchor)) == null ? void 0 : _a.from) != null ? _b : null : null
-    };
-  });
+  const positioned = annotations.map((a) => ({
+    a,
+    at: positionOf(a, source)
+  }));
   return positioned.sort((x, y) => {
     if (x.at === null && y.at === null)
       return 0;
@@ -827,6 +837,19 @@ async function inDocumentOrder(app, file, annotations, text) {
       return -1;
     return x.at - y.at;
   }).map((p) => p.a);
+}
+function positionOf(a, source) {
+  var _a, _b;
+  if (a.anchor.kind === "markdown")
+    return (_b = (_a = resolveMarkdown(source, a.anchor)) == null ? void 0 : _a.from) != null ? _b : null;
+  if (a.anchor.kind === "pdf") {
+    const span = a.anchor.spans[0];
+    if (!span)
+      return null;
+    const [item, offset] = span.selection;
+    return span.page * 1e9 + item * 1e4 + Math.min(offset, 9999);
+  }
+  return null;
 }
 
 // src/store/orphans.ts
@@ -872,6 +895,48 @@ var import_obsidian7 = require("obsidian");
 // src/hosts/markdown/reveal.ts
 var import_obsidian4 = require("obsidian");
 
+// src/hosts/pdf/pdfPlus.ts
+function pdfPlus(app) {
+  var _a, _b, _c, _d;
+  const plugins = (_a = app.plugins) == null ? void 0 : _a.plugins;
+  const lib = (_b = plugins == null ? void 0 : plugins["pdf-plus"]) == null ? void 0 : _b.lib;
+  const copyLink = lib == null ? void 0 : lib.copyLink;
+  const geometry = (_c = lib == null ? void 0 : lib.highlight) == null ? void 0 : _c.geometry;
+  const viewer = (_d = lib == null ? void 0 : lib.highlight) == null ? void 0 : _d.viewer;
+  if (!lib || !copyLink || !geometry || !viewer || typeof copyLink.getTextSelectionRange !== "function" || typeof geometry.computeMergedHighlightRects !== "function" || typeof viewer.placeRectInPage !== "function" || typeof lib.onTextLayerReady !== "function")
+    return null;
+  const link = copyLink;
+  const geo = geometry;
+  const view = viewer;
+  const layers = lib;
+  return {
+    selectionIn(pageEl, range) {
+      const r = link.getTextSelectionRange(pageEl, range);
+      return r ? [r.beginIndex, r.beginOffset, r.endIndex, r.endOffset] : null;
+    },
+    rects(info, [bi, bo, ei, eo]) {
+      var _a2;
+      return ((_a2 = geo.computeMergedHighlightRects(info, bi, bo, ei, eo)) != null ? _a2 : []).map((m) => m.rect);
+    },
+    place(rect, page) {
+      return view.placeRectInPage(rect, page);
+    },
+    onTextLayerReady(child, owner, ready) {
+      layers.onTextLayerReady(child.pdfViewer, owner, ready);
+    }
+  };
+}
+function childOf(view) {
+  var _a;
+  const child = (_a = view.viewer) == null ? void 0 : _a.child;
+  return child && typeof child.getPage === "function" ? child : null;
+}
+function textLayerOf(page) {
+  const builder = page.textLayer;
+  const info = builder && "textLayer" in builder ? builder.textLayer : builder;
+  return info && Array.isArray(info.textContentItems) && Array.isArray(info.textDivs) ? info : null;
+}
+
 // src/dom.ts
 function asEl(value) {
   return narrow(value, HTMLElement);
@@ -898,8 +963,8 @@ function narrow(value, type) {
 // src/hosts/transcript/segmentEnd.ts
 var PLAY_ON = Infinity;
 var SAME_MOMENT = 0.01;
-function endOfSegment(starts, start, duration) {
-  const next = starts.filter((s) => Number.isFinite(s) && s > start + SAME_MOMENT).sort((a, b) => a - b)[0];
+function endOfSegment(starts2, start, duration) {
+  const next = starts2.filter((s) => Number.isFinite(s) && s > start + SAME_MOMENT).sort((a, b) => a - b)[0];
   if (next !== void 0)
     return next;
   return Number.isFinite(duration) && duration > start ? duration : PLAY_ON;
@@ -907,25 +972,25 @@ function endOfSegment(starts, start, duration) {
 
 // src/anchor/lines.ts
 function lineStarts(source) {
-  const starts = [0];
+  const starts2 = [0];
   for (let i = 0; i < source.length; i++) {
     if (source[i] === "\n")
-      starts.push(i + 1);
+      starts2.push(i + 1);
   }
-  return starts;
+  return starts2;
 }
-function rangeOfLines(source, starts, from, to) {
+function rangeOfLines(source, starts2, from, to) {
   var _a;
-  const first = (_a = starts[Math.max(0, Math.min(from, starts.length - 1))]) != null ? _a : 0;
-  const after = starts[to + 1];
+  const first = (_a = starts2[Math.max(0, Math.min(from, starts2.length - 1))]) != null ? _a : 0;
+  const after = starts2[to + 1];
   return { from: first, to: after === void 0 ? source.length : after };
 }
-function lineOf(starts, offset) {
+function lineOf(starts2, offset) {
   let low = 0;
-  let high = starts.length - 1;
+  let high = starts2.length - 1;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    if (starts[mid] <= offset)
+    if (starts2[mid] <= offset)
       low = mid;
     else
       high = mid - 1;
@@ -944,6 +1009,10 @@ async function reveal(app, file, annotation) {
     await revealInTranscript(app, file, annotation);
     return;
   }
+  if (annotation.anchor.kind === "pdf") {
+    await revealInPdf(app, file, annotation);
+    return;
+  }
   await revealInMarkdown(app, file, annotation);
 }
 async function revealInTranscript(app, file, annotation) {
@@ -955,7 +1024,7 @@ async function revealInTranscript(app, file, annotation) {
   const media = await waitFor(() => asMedia(document.querySelector(".mt-view video, .mt-view audio")));
   if (!media)
     return;
-  const starts = (_a = await waitFor(() => nonEmpty(segmentStarts(file.path)))) != null ? _a : [];
+  const starts2 = (_a = await waitFor(() => nonEmpty(segmentStarts(file.path)))) != null ? _a : [];
   const at = anchor.start;
   const seek = () => {
     media.currentTime = at;
@@ -964,7 +1033,7 @@ async function revealInTranscript(app, file, annotation) {
     seek();
   else
     media.addEventListener("loadedmetadata", seek, { once: true });
-  playUntilEndOfSegment(media, starts, at, media.duration);
+  playUntilEndOfSegment(media, starts2, at, media.duration);
   void media.play();
   await showMark(document.body, annotation.id, ".mt-transcript", ".mt-transcript", () => {
   });
@@ -981,9 +1050,9 @@ async function waitFor(look, tries = 40) {
   }
   return null;
 }
-function playUntilEndOfSegment(media, starts, start, duration) {
+function playUntilEndOfSegment(media, starts2, start, duration) {
   cancelStop == null ? void 0 : cancelStop();
-  const until = endOfSegment(starts, start, duration);
+  const until = endOfSegment(starts2, start, duration);
   if (until === PLAY_ON)
     return;
   const check = () => {
@@ -1061,6 +1130,24 @@ async function showNote(app, file, line) {
   const leaf = app.workspace.getLeaf(false);
   await leaf.openFile(file, line === null ? void 0 : { eState: { scroll: line } });
   return leaf.view instanceof import_obsidian4.MarkdownView ? leaf.view : null;
+}
+async function revealInPdf(app, file, annotation) {
+  var _a, _b;
+  if (annotation.anchor.kind !== "pdf")
+    return;
+  const page = (_b = (_a = annotation.anchor.spans[0]) == null ? void 0 : _a.page) != null ? _b : 1;
+  let leaf = app.workspace.getLeavesOfType("pdf").find((l) => l.view.file === file);
+  if (leaf) {
+    app.workspace.setActiveLeaf(leaf, { focus: true });
+  } else {
+    leaf = app.workspace.getLeaf(false);
+    await leaf.openFile(file, { eState: { subpath: `#page=${page}` } });
+  }
+  const view = leaf.view;
+  await showMark(view.containerEl, annotation.id, ".page", ".pdf-viewer-container", () => {
+    var _a2, _b2;
+    (_b2 = (_a2 = childOf(view)) == null ? void 0 : _a2.pdfViewer.pdfViewer) == null ? void 0 : _b2.scrollPageIntoView({ pageNumber: page });
+  });
 }
 async function lineOfMark(app, file, annotation) {
   if (annotation.anchor.kind !== "markdown")
@@ -1231,12 +1318,70 @@ function claimMenu() {
   return true;
 }
 
+// src/anchor/cjk.ts
+var SUPPLEMENT = {
+  "\u2E81": "\u5382",
+  "\u2E87": "\u51E0",
+  "\u2E8A": "\u535C",
+  "\u2E8C": "\u5C0F",
+  "\u2E95": "\u5F50",
+  "\u2E97": "\u5FC3",
+  "\u2E9D": "\u6708",
+  "\u2E9F": "\u6BCD",
+  "\u2EA0": "\u6C11",
+  "\u2EAE": "\u7AF9",
+  "\u2EBA": "\u807F",
+  "\u2EBC": "\u6708",
+  "\u2EC1": "\u864E",
+  "\u2EC4": "\u897F",
+  "\u2EC5": "\u89C1",
+  "\u2EC6": "\u89D2",
+  "\u2EC8": "\u8BA0",
+  "\u2EC9": "\u8D1D",
+  "\u2ECB": "\u8F66",
+  "\u2ECC": "\u8FB6",
+  "\u2ECD": "\u8FB6",
+  "\u2ECF": "\u961D",
+  "\u2ED0": "\u9485",
+  "\u2ED1": "\u9577",
+  "\u2ED2": "\u9578",
+  "\u2ED3": "\u957F",
+  "\u2ED4": "\u95E8",
+  "\u2ED7": "\u96E8",
+  "\u2ED8": "\u9752",
+  "\u2ED9": "\u97E6",
+  "\u2EDA": "\u9875",
+  "\u2EDB": "\u98CE",
+  "\u2EDC": "\u98DE",
+  "\u2EDD": "\u98DF",
+  "\u2EE2": "\u9A6C",
+  "\u2EE3": "\u9AA8",
+  "\u2EE4": "\u9B3C",
+  "\u2EE5": "\u9C7C",
+  "\u2EE6": "\u9E1F",
+  "\u2EE7": "\u5364",
+  "\u2EE8": "\u9EA6",
+  "\u2EE9": "\u9EC4",
+  "\u2EEC": "\u9F50",
+  "\u2EEE": "\u9F7F",
+  "\u2EF0": "\u9F99",
+  "\u2EF3": "\u9F9F"
+};
+var KANGXI = /[⼀-⿟]/g;
+var RADICAL = /[⺀-⻿]/g;
+function readable(text) {
+  return text.replace(KANGXI, (c) => c.normalize("NFKC")).replace(RADICAL, (c) => {
+    var _a;
+    return (_a = SUPPLEMENT[c]) != null ? _a : c;
+  });
+}
+
 // src/store/describeMark.ts
 function describeMark(annotation, options) {
   var _a;
   const { anchor } = annotation;
   const lines = [];
-  for (const line of anchor.quote.split("\n"))
+  for (const line of readable(anchor.quote).split("\n"))
     lines.push(`> ${line}`);
   if (isComment(annotation)) {
     lines.push("");
@@ -1247,6 +1392,10 @@ function describeMark(annotation, options) {
   lines.push(`Source: ${options.targetPath}`);
   if (anchor.kind === "transcript" && options.clock) {
     lines.push(`At: ${options.clock(anchor.start)}`);
+  }
+  if (anchor.kind === "pdf" && anchor.spans.length > 0) {
+    const pages = [...new Set(anchor.spans.map((s) => s.page))];
+    lines.push(pages.length === 1 ? `Page: ${pages[0]}` : `Pages: ${pages[0]}\u2013${pages[pages.length - 1]}`);
   }
   const times = annotation.hits.map(options.when);
   lines.push(
@@ -1479,6 +1628,8 @@ var ReviewView = class extends import_obsidian6.ItemView {
    */
   async currentText(file) {
     var _a, _b, _c;
+    if (file.extension !== "md")
+      return "";
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
       if (view instanceof import_obsidian7.MarkdownView && ((_a = view.file) == null ? void 0 : _a.path) === file.path) {
@@ -1495,6 +1646,8 @@ var ReviewView = class extends import_obsidian6.ItemView {
     }
   }
   async diskText(file) {
+    if (file.extension !== "md")
+      return "";
     try {
       return await this.app.vault.cachedRead(file);
     } catch (e) {
@@ -1505,7 +1658,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
     root.createDiv("at-empty").setText(message);
   }
   renderEntry(root, annotation, targetPath, lost = false, fromEmbed = false) {
-    var _a, _b;
+    var _a, _b, _c, _d;
     const el = root.createDiv("at-entry");
     if (lost)
       el.addClass("at-entry-lost");
@@ -1513,7 +1666,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
       const thumb = el.createDiv("at-thumb");
       void import_obsidian6.MarkdownRenderer.render(this.app, annotation.anchor.quote, thumb, targetPath, this);
     } else {
-      el.createDiv("at-quote").setText(annotation.anchor.quote);
+      el.createDiv("at-quote").setText(readable(annotation.anchor.quote));
     }
     if (isComment(annotation)) {
       el.createDiv("at-body").setText((_a = annotation.body) != null ? _a : "");
@@ -1527,6 +1680,9 @@ var ReviewView = class extends import_obsidian6.ItemView {
     }
     if (annotation.anchor.kind === "transcript") {
       left.createSpan({ text: fmtTime(annotation.anchor.start), cls: "at-time" });
+    }
+    if (annotation.anchor.kind === "pdf") {
+      left.createSpan({ text: `p. ${(_d = (_c = annotation.anchor.spans[0]) == null ? void 0 : _c.page) != null ? _d : "?"}`, cls: "at-time" });
     }
     const right = meta.createDiv("at-meta-right");
     if (annotation.hits.length > 1) {
@@ -1613,7 +1769,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
       void this.reattach(targetPath, annotation);
     }));
     menu.addItem((i) => i.setTitle("Copy text").setIcon("copy").onClick(() => {
-      void navigator.clipboard.writeText(annotation.anchor.quote);
+      void navigator.clipboard.writeText(readable(annotation.anchor.quote));
     }));
     menu.addItem((i) => i.setTitle("Remove mark").setIcon("trash").setWarning(true).onClick(() => {
       void this.plugin.store.remove(targetPath, annotation.id);
@@ -1668,7 +1824,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
   }
   editComment(targetPath, annotation) {
     var _a;
-    new CommentModal(this.app, annotation.anchor.quote, (_a = annotation.body) != null ? _a : "", (body) => {
+    new CommentModal(this.app, readable(annotation.anchor.quote), (_a = annotation.body) != null ? _a : "", (body) => {
       void this.plugin.store.update(targetPath, annotation.id, { body: body || null });
     }).open();
   }
@@ -1945,8 +2101,9 @@ ${body}` : body;
 };
 async function repairOnLoad(app, data) {
   const file = app.vault.getAbstractFileByPath(data.target);
-  if (!(file instanceof import_obsidian8.TFile) || data.annotations.length === 0)
+  if (!(file instanceof import_obsidian8.TFile) || file.extension !== "md" || data.annotations.length === 0) {
     return { data, changed: false };
+  }
   let source;
   try {
     source = await app.vault.cachedRead(file);
@@ -2936,10 +3093,10 @@ function paintQuote(root, annotation, quote = annotation.anchor.quote) {
   const nodes = textNodesIn(root);
   if (nodes.length === 0)
     return;
-  const starts = [];
+  const starts2 = [];
   let full = "";
   for (const n of nodes) {
-    starts.push(full.length);
+    starts2.push(full.length);
     full += n.data;
   }
   const blocks = blocksOf(quote);
@@ -2948,7 +3105,7 @@ function paintQuote(root, annotation, quote = annotation.anchor.quote) {
   const spans = [];
   const cover = (at, end) => {
     for (let i = 0; i < nodes.length; i++) {
-      const nodeStart = starts[i];
+      const nodeStart = starts2[i];
       const nodeEnd = nodeStart + nodes[i].data.length;
       if (nodeEnd <= at || nodeStart >= end)
         continue;
@@ -3245,9 +3402,9 @@ function repaintReadingViews(app, provider) {
     if (annotations.length > 0) {
       paintImages(container, annotations);
       const placed = place(source, annotations);
-      const starts = lineStarts(source);
+      const starts2 = lineStarts(source);
       for (const block of blocksOf2(container))
-        paintPlaced(block, source, starts, placed);
+        paintPlaced(block, source, starts2, placed);
     }
     for (const note of transcludedNotes(app, view.file)) {
       const theirs = provider(note.path);
@@ -3281,12 +3438,12 @@ function place(source, annotations) {
   }
   return placed;
 }
-function paintPlaced(el, source, starts, placed) {
+function paintPlaced(el, source, starts2, placed) {
   var _a;
   const lines = (_a = el.dataset[LINES]) == null ? void 0 : _a.split(",").map(Number);
   if (!lines || lines.length !== 2 || lines.some((n) => !Number.isFinite(n)))
     return;
-  const block = rangeOfLines(source, starts, lines[0], lines[1]);
+  const block = rangeOfLines(source, starts2, lines[0], lines[1]);
   for (const { annotation, at } of placed) {
     const piece = intersect(at, block);
     if (!piece)
@@ -3666,6 +3823,442 @@ var TranscriptHost = class {
   }
 };
 
+// src/hosts/pdf/PdfHost.ts
+var import_obsidian13 = require("obsidian");
+
+// src/anchor/pdfText.ts
+function starts(items) {
+  const out = [];
+  let at = 0;
+  for (const item of items) {
+    out.push(at);
+    at += item.length;
+  }
+  return out;
+}
+function pageText(items) {
+  return items.join("");
+}
+function toOffsets(items, [bi, bo, ei, eo]) {
+  if (bi < 0 || ei >= items.length || bi > ei)
+    return null;
+  const at = starts(items);
+  const from = at[bi] + Math.min(bo, items[bi].length);
+  const to = at[ei] + Math.min(eo, items[ei].length);
+  return to > from ? { from, to } : null;
+}
+function toSelection(items, from, to) {
+  const at = starts(items);
+  const total = pageText(items).length;
+  if (from < 0 || to > total || to <= from)
+    return null;
+  const begin = itemAt(at, items, from);
+  const end = itemAt(at, items, to - 1);
+  return [begin, from - at[begin], end, to - at[end]];
+}
+function itemAt(at, items, offset) {
+  let i = at.length - 1;
+  while (i > 0 && (at[i] > offset || items[i].length === 0))
+    i--;
+  return i;
+}
+function spanText(items, selection) {
+  const range = toOffsets(items, selection);
+  return range && pageText(items).slice(range.from, range.to);
+}
+function describePdf(spans, pages) {
+  var _a, _b, _c, _d;
+  const parts = [];
+  for (const span of spans) {
+    const items = pages.get(span.page);
+    const text = items && spanText(items, span.selection);
+    if (text === null || text === void 0)
+      return null;
+    parts.push(text);
+  }
+  const first = spans[0], last = spans[spans.length - 1];
+  if (!first || !last)
+    return null;
+  const head = pageText((_a = pages.get(first.page)) != null ? _a : []);
+  const tail = pageText((_b = pages.get(last.page)) != null ? _b : []);
+  const from = toOffsets((_c = pages.get(first.page)) != null ? _c : [], first.selection).from;
+  const to = toOffsets((_d = pages.get(last.page)) != null ? _d : [], last.selection).to;
+  return {
+    quote: parts.join("\n"),
+    prefix: head.slice(Math.max(0, from - CONTEXT_LEN), from),
+    suffix: tail.slice(to, to + CONTEXT_LEN)
+  };
+}
+function resolveSpan(items, span, quote, prefix, suffix) {
+  var _a, _b;
+  if (spanText(items, span.selection) === quote)
+    return span.selection;
+  const text = pageText(items);
+  const hint = toOffsets(items, span.selection);
+  const found = resolve(text, {
+    quote,
+    prefix,
+    suffix,
+    from: (_a = hint == null ? void 0 : hint.from) != null ? _a : 0,
+    to: (_b = hint == null ? void 0 : hint.to) != null ? _b : quote.length
+  });
+  return found ? toSelection(items, found.from, found.to) : null;
+}
+
+// src/hosts/pdf/PdfHost.ts
+var PdfHost = class {
+  constructor(app, plugin, store, settings) {
+    this.app = app;
+    this.plugin = plugin;
+    this.store = store;
+    this.settings = settings;
+    /** One per open PDF viewer: what it shows, and what to unload to stop painting it. */
+    this.painters = /* @__PURE__ */ new Map();
+    this.popover = new SelectionPopover();
+    this.bubble = new CommentBubble();
+    /** Where the last right-click in a PDF was, for the menu PDF++ opens after it. */
+    this.contextAt = null;
+  }
+  register() {
+    const attach = () => this.attachAll();
+    this.app.workspace.onLayoutReady(attach);
+    this.plugin.registerEvent(this.app.workspace.on("layout-change", attach));
+    this.plugin.registerEvent(this.app.workspace.on("file-open", attach));
+    this.plugin.register(this.store.onChange((path) => this.repaint(path)));
+    this.plugin.register(() => this.detachAll());
+    this.plugin.registerDomEvent(document, "mouseup", (e) => {
+      var _a;
+      if (e.button !== 0 || !this.settings.popoverOnSelection)
+        return;
+      if (!this.inPdf(e.target))
+        return;
+      if ((_a = asEl(e.target)) == null ? void 0 : _a.closest(".at-popover, .at-bubble"))
+        return;
+      window.setTimeout(() => {
+        void this.onSelectionMade();
+      }, 0);
+    });
+    this.plugin.registerDomEvent(document, "click", (e) => {
+      var _a, _b;
+      if (!this.inPdf(e.target))
+        return;
+      if (((_b = (_a = window.getSelection()) == null ? void 0 : _a.toString().trim().length) != null ? _b : 0) > 0)
+        return;
+      const hit = this.markAt(e.clientX, e.clientY);
+      if (hit)
+        void this.showBubble(hit);
+    });
+    this.plugin.registerDomEvent(document, "contextmenu", (e) => {
+      this.contextAt = this.inPdf(e.target) ? { x: e.clientX, y: e.clientY } : null;
+    }, { capture: true });
+    const events = this.app.workspace;
+    this.plugin.registerEvent(events.on("pdf-menu", (menu) => {
+      if (menu instanceof import_obsidian13.Menu)
+        this.addMenuItems(menu);
+    }));
+  }
+  detach() {
+    this.popover.hide();
+    this.bubble.hide();
+  }
+  // ── Painting ───────────────────────────────────────────────────────────────
+  /** Start painting every open PDF not painted yet; stop for those closed. */
+  attachAll() {
+    const lib = pdfPlus(this.app);
+    const open = /* @__PURE__ */ new Map();
+    for (const leaf of this.app.workspace.getLeavesOfType("pdf")) {
+      const file = leaf.view.file;
+      const child = childOf(leaf.view);
+      if (file && child)
+        open.set(child, file.path);
+    }
+    for (const [child, painter] of this.painters) {
+      if (open.get(child) !== painter.path) {
+        painter.owner.unload();
+        this.painters.delete(child);
+      }
+    }
+    if (!lib)
+      return;
+    for (const [child, path] of open) {
+      if (this.painters.has(child))
+        continue;
+      const owner = new import_obsidian13.Component();
+      owner.load();
+      this.painters.set(child, { path, owner });
+      void this.store.get(path).then(() => {
+        var _a;
+        if (((_a = this.painters.get(child)) == null ? void 0 : _a.owner) !== owner)
+          return;
+        lib.onTextLayerReady(child, owner, (page, view) => this.paintPage(path, page, view));
+      });
+    }
+  }
+  /** Paint a file's PDFs afresh: every page already drawn is called back again. */
+  repaint(path) {
+    for (const [child, painter] of this.painters) {
+      if (painter.path !== path)
+        continue;
+      painter.owner.unload();
+      this.painters.delete(child);
+    }
+    this.attachAll();
+  }
+  detachAll() {
+    for (const { owner } of this.painters.values())
+      owner.unload();
+    this.painters.clear();
+    document.querySelectorAll(".at-pdf-hl").forEach((el) => el.remove());
+  }
+  /** Draw this page's marks, replacing whatever was drawn for it before. */
+  paintPage(path, page, view) {
+    const lib = pdfPlus(this.app);
+    view.div.querySelectorAll(".at-pdf-hl").forEach((el) => el.remove());
+    const info = textLayerOf(view);
+    if (!lib || !info)
+      return;
+    const items = info.textContentItems.map((i) => i.str);
+    for (const a of this.store.peek(path)) {
+      if (a.anchor.kind !== "pdf")
+        continue;
+      const anchor = a.anchor;
+      anchor.spans.forEach((span, k) => {
+        if (span.page !== page)
+          return;
+        const selection = this.locate(items, anchor, k);
+        if (!selection)
+          return;
+        for (const rect of lib.rects(info, selection)) {
+          const el = lib.place(rect, view);
+          el.className = isComment(a) ? "at-hl at-pdf-hl at-hl-comment" : "at-hl at-pdf-hl";
+          el.dataset.atId = a.id;
+        }
+      });
+    }
+  }
+  /** Where span `k` of an anchor sits among these items now, if anywhere. */
+  locate(items, anchor, k) {
+    const span = anchor.spans[k];
+    const parts = anchor.quote.split("\n");
+    if (parts.length !== anchor.spans.length) {
+      return spanText(items, span.selection) ? span.selection : null;
+    }
+    const last = anchor.spans.length - 1;
+    return resolveSpan(items, span, parts[k], k === 0 ? anchor.prefix : "", k === last ? anchor.suffix : "");
+  }
+  // ── Selecting ──────────────────────────────────────────────────────────────
+  inPdf(target) {
+    var _a;
+    return !!((_a = elementOf(target)) == null ? void 0 : _a.closest(".pdf-container, .pdf-viewer-container"));
+  }
+  /** The open PDF whose view holds `node`. */
+  viewOf(node) {
+    for (const leaf of this.app.workspace.getLeavesOfType("pdf")) {
+      const view = leaf.view;
+      const child = childOf(view);
+      if (view.file && child && view.containerEl.contains(node))
+        return { file: view.file, child };
+    }
+    return null;
+  }
+  /**
+   * The selection as an anchor: one span for each page it touches.
+   *
+   * PDF++ reads a selection one page at a time, so a selection across pages is
+   * cut at each page boundary and each piece read on its own page.
+   */
+  capture() {
+    var _a;
+    const lib = pdfPlus(this.app);
+    const selection = window.getSelection();
+    if (!lib || !selection || selection.rangeCount === 0 || !selection.toString().trim())
+      return null;
+    const range = selection.getRangeAt(0);
+    const found = this.viewOf(range.startContainer);
+    if (!found)
+      return null;
+    const pageOf = (n) => {
+      var _a2, _b;
+      return Number((_b = asEl((_a2 = elementOf(n)) == null ? void 0 : _a2.closest(".page"))) == null ? void 0 : _b.dataset.pageNumber);
+    };
+    const first = pageOf(range.startContainer);
+    const last = pageOf(range.endContainer);
+    if (!Number.isFinite(first) || !Number.isFinite(last))
+      return null;
+    const spans = [];
+    const pages = /* @__PURE__ */ new Map();
+    for (let page = first; page <= last; page++) {
+      const view = found.child.getPage(page);
+      const info = view && textLayerOf(view);
+      if (!info || info.textDivs.length === 0)
+        continue;
+      const part = this.partOn(info, range, page === first, page === last);
+      const at = part && lib.selectionIn(view.div, part);
+      if (!at)
+        continue;
+      const items = info.textContentItems.map((i) => i.str);
+      if (!((_a = spanText(items, at)) == null ? void 0 : _a.trim()))
+        continue;
+      pages.set(page, items);
+      spans.push({ page, selection: at });
+    }
+    const described = spans.length > 0 && describePdf(spans, pages);
+    if (!described)
+      return null;
+    return { file: found.file, anchor: { kind: "pdf", spans, ...described } };
+  }
+  /**
+   * The piece of `range` on one page, with both ends inside its text.
+   *
+   * A drag rarely ends exactly on a character: between lines, or past the end
+   * of one, the browser puts the end in the layer itself or in pdf.js's
+   * end-of-content filler — where no text item is, and PDF++ finds nothing.
+   * Such an end moves to the nearest edge of text on its side.
+   */
+  partOn(info, range, first, last) {
+    const divs = info.textDivs.filter((d) => d.textContent);
+    if (divs.length === 0)
+      return null;
+    const doc = divs[0].doc;
+    const part = doc.createRange();
+    const inText = (n) => divs.some((d) => d.contains(n));
+    if (first && inText(range.startContainer)) {
+      part.setStart(range.startContainer, range.startOffset);
+    } else {
+      const d = first ? divs.find((x) => range.comparePoint(x, 0) >= 0) : divs[0];
+      if (!d)
+        return null;
+      const t = firstText(d);
+      if (!t)
+        return null;
+      part.setStart(t, 0);
+    }
+    if (last && inText(range.endContainer)) {
+      part.setEnd(range.endContainer, range.endOffset);
+    } else {
+      const d = last ? [...divs].reverse().find((x) => range.comparePoint(x, x.childNodes.length) <= 0) : divs[divs.length - 1];
+      if (!d)
+        return null;
+      const t = lastText(d);
+      if (!t)
+        return null;
+      part.setEnd(t, t.length);
+    }
+    return part.collapsed ? null : part;
+  }
+  async onSelectionMade() {
+    const captured = this.capture();
+    if (!captured)
+      return;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0)
+      return;
+    this.popover.showAt(selection.getRangeAt(0).getBoundingClientRect(), {
+      onMark: () => {
+        void this.mark(captured.file, captured.anchor, null);
+      },
+      onComment: () => this.comment(captured.file, captured.anchor)
+    });
+  }
+  /** Attention's items in PDF++'s menu: for a selection, or for a mark clicked on. */
+  addMenuItems(menu) {
+    const hit = this.contextAt && this.markAt(this.contextAt.x, this.contextAt.y);
+    if (hit) {
+      menu.addItem((i) => i.setSection("attention").setTitle("Edit comment\u2026").setIcon("message-square").onClick(() => {
+        void this.editComment(hit.path, hit.id);
+      }));
+      menu.addItem((i) => i.setSection("attention").setTitle("Mark again").setIcon("highlighter").onClick(() => {
+        void this.markAgain(hit.path, hit.id);
+      }));
+      menu.addItem((i) => i.setSection("attention").setTitle("Remove mark").setIcon("trash").setWarning(true).onClick(() => {
+        void this.store.remove(hit.path, hit.id);
+      }));
+      return;
+    }
+    const captured = this.capture();
+    if (!captured)
+      return;
+    menu.addItem((i) => i.setSection("attention").setTitle("Mark").setIcon("highlighter").onClick(() => {
+      void this.mark(captured.file, captured.anchor, null);
+    }));
+    menu.addItem((i) => i.setSection("attention").setTitle("Comment\u2026").setIcon("message-square").onClick(() => this.comment(captured.file, captured.anchor)));
+  }
+  /** The mark drawn under a point, if any, and the PDF it belongs to. */
+  markAt(x, y) {
+    var _a;
+    for (const raw of Array.from(document.querySelectorAll(".at-pdf-hl"))) {
+      const el = asEl(raw);
+      const id = el == null ? void 0 : el.dataset.atId;
+      if (!el || !id)
+        continue;
+      const r = el.getBoundingClientRect();
+      if (x < r.left || x > r.right || y < r.top || y > r.bottom)
+        continue;
+      const path = (_a = this.viewOf(el)) == null ? void 0 : _a.file.path;
+      if (path)
+        return { path, id, el };
+    }
+    return null;
+  }
+  // ── Actions ────────────────────────────────────────────────────────────────
+  async showBubble(hit) {
+    const annotation = await this.find(hit.path, hit.id);
+    if (!annotation)
+      return;
+    this.bubble.showFor(hit.el.getBoundingClientRect(), annotation, {
+      onEdit: () => {
+        void this.editComment(hit.path, hit.id);
+      },
+      onMarkAgain: () => {
+        void this.markAgain(hit.path, hit.id);
+      },
+      onRemove: () => {
+        void this.store.remove(hit.path, hit.id);
+      }
+    });
+  }
+  comment(file, anchor) {
+    new CommentModal(this.app, readable(anchor.quote), "", (body) => {
+      void this.mark(file, anchor, body || null);
+    }).open();
+  }
+  async editComment(path, id) {
+    var _a;
+    const annotation = await this.find(path, id);
+    if (!annotation)
+      return;
+    new CommentModal(this.app, readable(annotation.anchor.quote), (_a = annotation.body) != null ? _a : "", (body) => {
+      void this.store.update(path, id, { body: body || null });
+    }).open();
+  }
+  async markAgain(path, id) {
+    const updated = await this.store.markAgain(path, id);
+    if (updated)
+      new import_obsidian13.Notice(`Marked ${updated.hits.length}\xD7 now`);
+  }
+  async mark(file, anchor, body) {
+    var _a;
+    (_a = window.getSelection()) == null ? void 0 : _a.removeAllRanges();
+    const { repeat, annotation } = await this.store.mark(file.path, anchor, body);
+    if (repeat)
+      new import_obsidian13.Notice(`Marked ${annotation.hits.length}\xD7 now`);
+  }
+  async find(path, id) {
+    return (await this.store.get(path)).annotations.find((a) => a.id === id);
+  }
+};
+function firstText(el) {
+  const walker = el.doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  return walker.nextNode();
+}
+function lastText(el) {
+  const walker = el.doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let last = null;
+  for (let n = walker.nextNode(); n; n = walker.nextNode())
+    last = n;
+  return last;
+}
+
 // src/store/migrateToTrack.ts
 function planMove(target, annotations) {
   var _a;
@@ -3690,7 +4283,7 @@ function planMove(target, annotations) {
 }
 
 // src/hosts/markdown/viewModeHost.ts
-var import_obsidian13 = require("obsidian");
+var import_obsidian14 = require("obsidian");
 
 // src/viewMode.ts
 var UI_MODE_KEY = "obsidianUIMode";
@@ -3774,7 +4367,7 @@ var ViewModeHost = class {
   applyToOpenNotes() {
     this.applied = /* @__PURE__ */ new WeakMap();
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
-      const file = leaf.view instanceof import_obsidian13.MarkdownView ? leaf.view.file : null;
+      const file = leaf.view instanceof import_obsidian14.MarkdownView ? leaf.view.file : null;
       if (file)
         this.apply(file, leaf);
     }
@@ -3814,7 +4407,7 @@ var ViewModeHost = class {
   leavesShowing(file) {
     return this.app.workspace.getLeavesOfType("markdown").filter((leaf) => {
       var _a;
-      return leaf.view instanceof import_obsidian13.MarkdownView && ((_a = leaf.view.file) == null ? void 0 : _a.path) === file.path;
+      return leaf.view instanceof import_obsidian14.MarkdownView && ((_a = leaf.view.file) == null ? void 0 : _a.path) === file.path;
     });
   }
   matches(leaf, target) {
@@ -3834,11 +4427,12 @@ var ViewModeHost = class {
 };
 
 // src/main.ts
-var AttentionPlugin = class extends import_obsidian14.Plugin {
+var AttentionPlugin = class extends import_obsidian15.Plugin {
   constructor() {
     super(...arguments);
     this.markdownHost = null;
     this.transcriptHost = null;
+    this.pdfHost = null;
     this.tracker = null;
     this.viewModes = null;
     /**
@@ -3858,6 +4452,10 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
       this.setupMarkdownHost();
     this.viewModes = new ViewModeHost(this.app, this, this.settings);
     this.viewModes.register();
+    if (this.settings.enablePdfHost) {
+      this.pdfHost = new PdfHost(this.app, this, this.store, this.settings);
+      this.pdfHost.register();
+    }
     if (this.settings.enableTranscriptHost) {
       this.transcriptHost = new TranscriptHost(this.app, this, this.store, this.settings);
       this.transcriptHost.register();
@@ -3919,8 +4517,8 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
       return false;
     const targetPath = targetPathFor(file.path);
     const target = targetPath && this.app.vault.getAbstractFileByPath(targetPath);
-    if (!(target instanceof import_obsidian14.TFile)) {
-      new import_obsidian14.Notice(
+    if (!(target instanceof import_obsidian15.TFile)) {
+      new import_obsidian15.Notice(
         `Attention: \u201C${targetPath != null ? targetPath : file.name}\u201D no longer exists. Its marks are still here \u2014 delete this file to discard them.`
       );
       return false;
@@ -3959,7 +4557,7 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
   async warmOpenFiles() {
     const paths = /* @__PURE__ */ new Set();
     this.app.workspace.getLeavesOfType("markdown").forEach((leaf) => {
-      const file = leaf.view instanceof import_obsidian14.MarkdownView ? leaf.view.file : null;
+      const file = leaf.view instanceof import_obsidian15.MarkdownView ? leaf.view.file : null;
       if (file)
         paths.add(file.path);
     });
@@ -4028,7 +4626,7 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
   rerenderReadingViews() {
     for (const leaf of this.app.workspace.getLeavesOfType("markdown")) {
       const view = leaf.view;
-      if (view instanceof import_obsidian14.MarkdownView && view.getMode() === "preview") {
+      if (view instanceof import_obsidian15.MarkdownView && view.getMode() === "preview") {
         view.previewMode.rerender(true);
       }
     }
@@ -4069,7 +4667,7 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
     this.settings.transcriptMarksOnTrack = true;
     await this.saveSettings();
     if (moved > 0) {
-      new import_obsidian14.Notice(`Attention: ${moved} transcript mark${moved === 1 ? "" : "s"} now filed under their subtitle track.`);
+      new import_obsidian15.Notice(`Attention: ${moved} transcript mark${moved === 1 ? "" : "s"} now filed under their subtitle track.`);
     }
   }
   async rebuildIndex() {
@@ -4103,7 +4701,7 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
     await leaf.loadIfDeferred();
     await this.app.workspace.revealLeaf(leaf);
     if (!focus) {
-      const editor = this.app.workspace.getActiveViewOfType(import_obsidian14.MarkdownView);
+      const editor = this.app.workspace.getActiveViewOfType(import_obsidian15.MarkdownView);
       if (editor)
         this.app.workspace.setActiveLeaf(editor.leaf, { focus: true });
     }
@@ -4123,10 +4721,10 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
    * is a sibling, so it travels with the folder — only a file's own rename does.
    */
   async handleRename(file, oldPath) {
-    if (!(file instanceof import_obsidian14.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian15.TFile) || isSidecarPath(file.path))
       return;
     const old = this.app.vault.getAbstractFileByPath(sidecarPathFor(oldPath));
-    if (!(old instanceof import_obsidian14.TFile))
+    if (!(old instanceof import_obsidian15.TFile))
       return;
     const nextPath = sidecarPathFor(file.path);
     if (old.path === nextPath)
@@ -4139,27 +4737,28 @@ var AttentionPlugin = class extends import_obsidian14.Plugin {
       this.index.renameFile(oldPath, file.path);
       this.refreshReviewViews();
     } catch (e) {
-      new import_obsidian14.Notice(`Attention: could not move annotations for ${file.name}`);
+      new import_obsidian15.Notice(`Attention: could not move annotations for ${file.name}`);
       console.error(e);
     }
   }
   async handleDelete(file) {
-    if (!(file instanceof import_obsidian14.TFile) || isSidecarPath(file.path))
+    if (!(file instanceof import_obsidian15.TFile) || isSidecarPath(file.path))
       return;
     if (this.settings.keepOrphanedSidecars)
       return;
     const sidecar = this.app.vault.getAbstractFileByPath(sidecarPathFor(file.path));
-    if (sidecar instanceof import_obsidian14.TFile)
+    if (sidecar instanceof import_obsidian15.TFile)
       await this.app.fileManager.trashFile(sidecar);
     this.store.forget(file.path);
     this.index.replaceFile(file.path, []);
     this.refreshReviewViews();
   }
   onunload() {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     (_a = this.markdownHost) == null ? void 0 : _a.detach();
     (_b = this.tracker) == null ? void 0 : _b.dispose();
     (_c = this.transcriptHost) == null ? void 0 : _c.detach();
+    (_d = this.pdfHost) == null ? void 0 : _d.detach();
     document.body.removeClass("at-style-background");
     document.body.setCssProps({ "--at-color": "" });
   }

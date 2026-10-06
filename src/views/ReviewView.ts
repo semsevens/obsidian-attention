@@ -15,6 +15,7 @@ import { CommentModal } from '../ui/CommentModal';
 import { asEl } from '../dom';
 import { claimMenu, onLongPress } from '../ui/touch';
 import { describeMark } from '../store/describeMark';
+import { readable } from '../anchor/cjk';
 import { preferredTrack, tracksFor } from '../hosts/transcript/trackFor';
 
 export const VIEW_TYPE_REVIEW = 'attention-review';
@@ -229,6 +230,10 @@ export class ReviewView extends ItemView {
    * is both alarming and wrong, so an empty answer falls through to the file.
    */
   private async currentText(file: TFile): Promise<string> {
+    // Only a note's marks are judged against its text. A recording or a PDF
+    // read as text is megabytes of nothing, and an empty answer leaves its
+    // marks as they are.
+    if (file.extension !== 'md') return '';
     for (const leaf of this.app.workspace.getLeavesOfType('markdown')) {
       const view = leaf.view;
       if (view instanceof MarkdownView && view.file?.path === file.path) {
@@ -241,6 +246,7 @@ export class ReviewView extends ItemView {
   }
 
   private async diskText(file: TFile): Promise<string> {
+    if (file.extension !== 'md') return '';
     try { return await this.app.vault.cachedRead(file); } catch { return ''; }
   }
 
@@ -266,7 +272,7 @@ export class ReviewView extends ItemView {
       const thumb = el.createDiv('at-thumb');
       void MarkdownRenderer.render(this.app, annotation.anchor.quote, thumb, targetPath, this);
     } else {
-      el.createDiv('at-quote').setText(annotation.anchor.quote);
+      el.createDiv('at-quote').setText(readable(annotation.anchor.quote));
     }
     if (isComment(annotation)) {
       el.createDiv('at-body').setText(annotation.body ?? '');
@@ -290,6 +296,9 @@ export class ReviewView extends ItemView {
     }
     if (annotation.anchor.kind === 'transcript') {
       left.createSpan({ text: fmtTime(annotation.anchor.start), cls: 'at-time' });
+    }
+    if (annotation.anchor.kind === 'pdf') {
+      left.createSpan({ text: `p. ${annotation.anchor.spans[0]?.page ?? '?'}`, cls: 'at-time' });
     }
 
     const right = meta.createDiv('at-meta-right');
@@ -359,7 +368,7 @@ export class ReviewView extends ItemView {
     menu.addItem(i => i.setTitle('Re-attach to selection').setIcon('link')
       .onClick(() => { void this.reattach(targetPath, annotation); }));
     menu.addItem(i => i.setTitle('Copy text').setIcon('copy')
-      .onClick(() => { void navigator.clipboard.writeText(annotation.anchor.quote); }));
+      .onClick(() => { void navigator.clipboard.writeText(readable(annotation.anchor.quote)); }));
     menu.addItem(i => i.setTitle('Remove mark').setIcon('trash').setWarning(true)
       .onClick(() => { void this.plugin.store.remove(targetPath, annotation.id); }));
     menu.showAtPosition(at);
@@ -414,7 +423,7 @@ export class ReviewView extends ItemView {
   }
 
   private editComment(targetPath: string, annotation: Annotation): void {
-    new CommentModal(this.app, annotation.anchor.quote, annotation.body ?? '', body => {
+    new CommentModal(this.app, readable(annotation.anchor.quote), annotation.body ?? '', body => {
       void this.plugin.store.update(targetPath, annotation.id, { body: body || null });
     }).open();
   }

@@ -22,6 +22,7 @@ import {
 import { AnchorTracker } from './anchor/AnchorTracker';
 import { readingModeHighlighter, repaintReadingViews } from './hosts/markdown/readingMode';
 import { TranscriptHost } from './hosts/transcript/TranscriptHost';
+import { PdfHost } from './hosts/pdf/PdfHost';
 import { planMove } from './store/migrateToTrack';
 import { ViewModeHost } from './hosts/markdown/viewModeHost';
 
@@ -31,6 +32,7 @@ export default class AttentionPlugin extends Plugin {
   store!: AnnotationStore;
   private markdownHost: MarkdownHost | null = null;
   private transcriptHost: TranscriptHost | null = null;
+  private pdfHost: PdfHost | null = null;
   private tracker: AnchorTracker | null = null;
   private viewModes: ViewModeHost | null = null;
 
@@ -51,6 +53,12 @@ export default class AttentionPlugin extends Plugin {
     // takes effect without a reload; the setting is read per note.
     this.viewModes = new ViewModeHost(this.app, this, this.settings);
     this.viewModes.register();
+
+    if (this.settings.enablePdfHost) {
+      // Dormant unless PDF++ is installed: it does the selecting and drawing.
+      this.pdfHost = new PdfHost(this.app, this, this.store, this.settings);
+      this.pdfHost.register();
+    }
 
     if (this.settings.enableTranscriptHost) {
       // Dormant unless obsidian-media-transcript is installed and announcing.
@@ -400,6 +408,7 @@ export default class AttentionPlugin extends Plugin {
     this.markdownHost?.detach();
     this.tracker?.dispose();
     this.transcriptHost?.detach();
+    this.pdfHost?.detach();
     document.body.removeClass('at-style-background');
     document.body.setCssProps({ '--at-color': '' });
   }
