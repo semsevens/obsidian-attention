@@ -1,7 +1,7 @@
 import { App, ItemView, Menu, Notice, WorkspaceLeaf, TFile, MarkdownRenderer } from 'obsidian';
 import type AttentionPlugin from '../main';
 import { IndexEntry, Bucket, BUCKET_ORDER } from '../store/review';
-import { Annotation, isComment, lastMarked } from '../model';
+import { Annotation, isComment, lastMarked, pdfPage } from '../model';
 import { Sort, SORT_LABELS, sortsFor, resolveSort, sortAnnotations } from '../store/sorting';
 import { inDocumentOrder } from '../store/documentOrder';
 import { classify } from '../store/orphans';
@@ -264,7 +264,17 @@ export class ReviewView extends ItemView {
     const el = root.createDiv('at-entry');
     if (lost) el.addClass('at-entry-lost');
 
-    if (isImageQuote(annotation.anchor.quote)) {
+    const anchor = annotation.anchor;
+    if (anchor.kind === 'pdf' && anchor.region) {
+      // The region itself, cut from its page by PDF++'s own embed — the same
+      // `![[x.pdf#page=…&rect=…]]` its rectangle tool copies. Built here, not
+      // stored: the file may have been renamed since.
+      const { page, rect } = anchor.region;
+      const thumb = el.createDiv('at-thumb at-thumb-pdf');
+      const embed = `![[${targetPath}#page=${page}&rect=${rect.map(v => Math.round(v)).join(',')}]]`;
+      void MarkdownRenderer.render(this.app, embed, thumb, targetPath, this);
+      if (anchor.quote) el.createDiv('at-quote at-quote-region').setText(readable(anchor.quote));
+    } else if (isImageQuote(annotation.anchor.quote)) {
       // Render the embed through Obsidian rather than resolving a URL here.
       // Whatever the note shows, this shows: a plugin that swaps remote
       // pictures for locally cached ones runs in that pipeline too, so the
@@ -298,7 +308,7 @@ export class ReviewView extends ItemView {
       left.createSpan({ text: fmtTime(annotation.anchor.start), cls: 'at-time' });
     }
     if (annotation.anchor.kind === 'pdf') {
-      left.createSpan({ text: `p. ${annotation.anchor.spans[0]?.page ?? '?'}`, cls: 'at-time' });
+      left.createSpan({ text: `p. ${pdfPage(annotation.anchor)}`, cls: 'at-time' });
     }
 
     const right = meta.createDiv('at-meta-right');
@@ -432,7 +442,7 @@ export class ReviewView extends ItemView {
     const file = this.app.vault.getAbstractFileByPath(targetPath);
     if (!(file instanceof TFile)) return;
 
-    await reveal(this.app, file, annotation);
+    await reveal(this.app, file, annotation, this.plugin.openModeFor(file));
     // Marking it seen is what makes "prefer things you haven't revisited" work.
     await this.plugin.markReviewed({ targetPath, annotation });
   }

@@ -192,6 +192,15 @@ body.at-style-background .at-hl:hover {
   mix-blend-mode: screen;
 }
 
+/* A region — a figure, a table — is outlined rather than filled: a fill over
+   a picture tints the picture, and the outline is what says "this part". */
+.pdf-plus-backlink-highlight-layer .at-pdf-hl.at-pdf-region {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 10%, transparent);
+  outline: 2px solid var(--at-color, #f5c542);
+  outline-offset: 2px;
+  mix-blend-mode: normal;
+}
+
 .pdf-plus-backlink-highlight-layer .at-pdf-hl.at-hl-comment {
   background: color-mix(in srgb, var(--at-color, #f5c542) 55%, transparent);
 }
@@ -515,4 +524,19 @@ img.at-flash {
 @keyframes at-flash-outline {
   from { outline-color: var(--text-accent); }
   to   { outline-color: transparent; }
+}
+
+/* A region of a PDF in the review panel: the picture, cut from its page. */
+.at-thumb-pdf {
+  max-height: 160px;
+  overflow: hidden;
+}
+
+.at-quote-region {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.pdf-plus-backlink-highlight-layer .at-pdf-hl.at-pdf-region.at-hl-comment {
+  background: color-mix(in srgb, var(--at-color, #f5c542) 16%, transparent);
 }

@@ -25,6 +25,7 @@ import { TranscriptHost } from './hosts/transcript/TranscriptHost';
 import { PdfHost } from './hosts/pdf/PdfHost';
 import { planMove } from './store/migrateToTrack';
 import { ViewModeHost } from './hosts/markdown/viewModeHost';
+import type { ViewModeTarget } from './viewMode';
 
 export default class AttentionPlugin extends Plugin {
   settings!: AttentionSettings;
@@ -260,6 +261,11 @@ export default class AttentionPlugin extends Plugin {
         view.previewMode.rerender(true);
       }
     }
+  }
+
+  /** The mode a note is put in when it opens, if a rule says so. */
+  openModeFor(file: TFile): ViewModeTarget | null {
+    return this.viewModes?.modeFor(file) ?? null;
   }
 
   /** Redraw after a setting that only affects how things are shown. */

@@ -12,6 +12,7 @@
 // rest of the plugin.
 
 import { App, Component, View } from 'obsidian';
+import type { PlacedItem } from '../../anchor/pdfText';
 
 export type Rect = [number, number, number, number];
 
@@ -23,7 +24,7 @@ export interface PageView {
 
 /** pdf.js's text layer for a page: its items and the elements drawing them. */
 export interface TextLayerInfo {
-  textContentItems: { str: string }[];
+  textContentItems: PlacedItem[];
   textDivs: HTMLElement[];
 }
 
@@ -34,6 +35,8 @@ export interface PdfChild {
 }
 
 export interface PdfPlus {
+  /** The PDF++ instance behind this — a new one after PDF++ reloads. */
+  readonly instance: object;
   /** A selection inside one page, in Obsidian's terms. */
   selectionIn(pageEl: HTMLElement, range: Range): [number, number, number, number] | null;
   /** The rectangles a selection covers on a page, merged line by line. */
@@ -42,11 +45,17 @@ export interface PdfPlus {
   place(rect: Rect, page: PageView): HTMLElement;
   /** Call `ready` for each page whose text is drawn, now and as more are. */
   onTextLayerReady(child: PdfChild, owner: Component, ready: (page: number, view: PageView) => void): void;
+  /**
+   * Call `drawn` after each rectangle drawn with PDF++'s rectangle tool, until
+   * `owner` unloads. PDF++ goes on doing what it does with one — copying its
+   * link — first.
+   */
+  onRectSelected(owner: Component, drawn: (child: PdfChild, page: number, rect: Rect) => void): void;
 }
 
 /** What we look for on PDF++'s `lib`, before knowing it is there. */
 interface Lib {
-  copyLink?: { getTextSelectionRange?: unknown };
+  copyLink?: { getTextSelectionRange?: unknown; copyEmbedLinkToRect?: unknown };
   highlight?: { geometry?: { computeMergedHighlightRects?: unknown }; viewer?: { placeRectInPage?: unknown } };
   onTextLayerReady?: unknown;
 }
@@ -78,6 +87,7 @@ export function pdfPlus(app: App): PdfPlus | null {
   const layers = lib as { onTextLayerReady(v: unknown, c: Component, cb: (page: number, view: PageView) => void): void };
 
   return {
+    instance: lib,
     selectionIn(pageEl, range) {
       const r = link.getTextSelectionRange(pageEl, range);
       return r ? [r.beginIndex, r.beginOffset, r.endIndex, r.endOffset] : null;
@@ -90,6 +100,31 @@ export function pdfPlus(app: App): PdfPlus | null {
     },
     onTextLayerReady(child, owner, ready) {
       layers.onTextLayerReady(child.pdfViewer, owner, ready);
+    },
+    onRectSelected(owner, drawn) {
+      // PDF++ offers no event for this: when a drag with its rectangle tool
+      // ends, it hands the rectangle straight to the method that copies its
+      // link. So that method is wrapped — on this instance only, calling the
+      // original first, and put back when `owner` unloads.
+      const target = copyLink as { copyEmbedLinkToRect?: unknown };
+      const original = target.copyEmbedLinkToRect;
+      const own = Object.getOwnPropertyNames(target).includes('copyEmbedLinkToRect');
+      if (typeof original !== 'function') return;
+      type Copy = (checking: boolean, child: PdfChild, page: number, rect: Rect, ...rest: unknown[]) => unknown;
+      const wrapped: Copy = function (this: unknown, checking, child, page, rect, ...rest) {
+        const result: unknown = (original as Copy).call(this, checking, child, page, rect, ...rest);
+        // `checking` asks only whether the command could run, from the palette.
+        if (!checking && Array.isArray(rect) && rect.length === 4) {
+          try { drawn(child, page, rect); } catch (e) { console.error('Attention:', e); }
+        }
+        return result;
+      };
+      target.copyEmbedLinkToRect = wrapped;
+      owner.register(() => {
+        if (target.copyEmbedLinkToRect !== wrapped) return;
+        if (own) target.copyEmbedLinkToRect = original;
+        else delete target.copyEmbedLinkToRect;
+      });
     },
   };
 }

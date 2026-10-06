@@ -31,6 +31,18 @@ export class ViewModeHost {
   }
 
   /**
+   * The mode `file` will be put in when it opens, or null if it is left alone.
+   *
+   * For opening a note straight into that mode. Opened in another, it is
+   * switched a moment later — and anything that already scrolled the first
+   * view, like jumping to a mark, finds the page replaced underneath it.
+   */
+  modeFor(file: TFile): ViewModeTarget | null {
+    const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+    return resolveViewMode(file.path, frontmatter, this.settings);
+  }
+
+  /**
    * Re-apply to every open note.
    *
    * For turning the feature on, or changing the rules, without having to

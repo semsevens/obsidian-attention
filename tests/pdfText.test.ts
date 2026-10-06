@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { describePdf, pageText, resolveSpan, spanText, toOffsets, toSelection } from '../src/anchor/pdfText';
+import { describePdf, pageText, resolveSpan, spanText, textInRect, toOffsets, toSelection } from '../src/anchor/pdfText';
 import { readable } from '../src/anchor/cjk';
 import { sameSpot, PdfAnchor } from '../src/model';
 
@@ -102,5 +102,41 @@ describe('readable', () => {
   });
   it('leaves ordinary text, full-width punctuation included, alone', () => {
     expect(readable('（括号）和 ABC，１２３')).toBe('（括号）和 ABC，１２３');
+  });
+});
+
+describe('textInRect', () => {
+  // Three lines: a caption above a figure, a label inside it, body text below.
+  const items = [
+    { str: 'THE LADDER DOWN', transform: [1, 0, 0, 1, 90, 600], width: 200, height: 10 },
+    { str: 'micrograd', transform: [1, 0, 0, 1, 100, 500], width: 60, height: 10 },
+    { str: 'nanoGPT', transform: [1, 0, 0, 1, 260, 500], width: 50, height: 10 },
+    { str: 'Fig. 2. The nano series.', transform: [1, 0, 0, 1, 72, 300], width: 150, height: 10 },
+    { str: '   ', transform: [1, 0, 0, 1, 100, 480], width: 5, height: 10 },
+  ];
+
+  it('collects the text whose middle is inside', () => {
+    expect(textInRect(items, [80, 450, 400, 620])).toBe('THE LADDER DOWN micrograd nanoGPT');
+  });
+
+  it('takes the corners in either order', () => {
+    expect(textInRect(items, [400, 620, 80, 450])).toBe('THE LADDER DOWN micrograd nanoGPT');
+  });
+
+  it('is empty for a region with no text — a picture', () => {
+    expect(textInRect(items, [400, 100, 500, 200])).toBe('');
+  });
+});
+
+describe('sameSpot for PDF regions', () => {
+  const region = (page: number, rect: [number, number, number, number]): PdfAnchor => ({
+    kind: 'pdf', quote: '', prefix: '', suffix: '', spans: [], region: { page, rect },
+  });
+  it('is the same region however the drag was rounded', () => {
+    expect(sameSpot(region(3, [80, 450, 400, 620]), region(3, [80.4, 449.7, 400, 620.2]))).toBe(true);
+  });
+  it('is another region on another page or in another place', () => {
+    expect(sameSpot(region(3, [80, 450, 400, 620]), region(4, [80, 450, 400, 620]))).toBe(false);
+    expect(sameSpot(region(3, [80, 450, 400, 620]), region(3, [90, 450, 400, 620]))).toBe(false);
   });
 });

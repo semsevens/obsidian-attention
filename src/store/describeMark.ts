@@ -30,7 +30,10 @@ export function describeMark(annotation: Annotation, options: DescribeOptions): 
 
   // The quote first and as a blockquote: pasted into a note it should read as
   // the passage it is, not as a field in a record.
-  for (const line of readable(anchor.quote).split('\n')) lines.push(`> ${line}`);
+  // A region of a PDF may have no words in it; say what it is instead.
+  const quote = readable(anchor.quote) ||
+    (anchor.kind === 'pdf' && anchor.region ? `(a region of page ${anchor.region.page})` : '');
+  for (const line of quote.split('\n')) lines.push(`> ${line}`);
 
   if (isComment(annotation)) {
     lines.push('');
@@ -43,8 +46,8 @@ export function describeMark(annotation: Annotation, options: DescribeOptions): 
   if (anchor.kind === 'transcript' && options.clock) {
     lines.push(`At: ${options.clock(anchor.start)}`);
   }
-  if (anchor.kind === 'pdf' && anchor.spans.length > 0) {
-    const pages = [...new Set(anchor.spans.map(s => s.page))];
+  if (anchor.kind === 'pdf') {
+    const pages = anchor.region ? [anchor.region.page] : [...new Set(anchor.spans.map(s => s.page))];
     lines.push(pages.length === 1 ? `Page: ${pages[0]}` : `Pages: ${pages[0]}–${pages[pages.length - 1]}`);
   }
 

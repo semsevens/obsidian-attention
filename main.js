@@ -265,6 +265,10 @@ function targetPathFor(sidecarPath) {
 var import_obsidian3 = require("obsidian");
 
 // src/model.ts
+function pdfPage(anchor) {
+  var _a, _b, _c, _d;
+  return (_d = (_c = (_a = anchor.region) == null ? void 0 : _a.page) != null ? _c : (_b = anchor.spans[0]) == null ? void 0 : _b.page) != null ? _d : 1;
+}
 function firstMarked(a) {
   var _a;
   return (_a = a.hits[0]) != null ? _a : "";
@@ -301,6 +305,9 @@ function sameSpot(a, b) {
     return a.seg === b.seg || Math.abs(a.start - b.start) < 0.5;
   }
   if (a.kind === "pdf" && b.kind === "pdf") {
+    if (a.region || b.region) {
+      return !!a.region && !!b.region && a.region.page === b.region.page && a.region.rect.every((v, i) => Math.abs(v - b.region.rect[i]) < 1);
+    }
     const [x, y] = [a.spans[0], b.spans[0]];
     return !!x && !!y && x.page === y.page && x.selection[0] === y.selection[0] && x.selection[1] === y.selection[1];
   }
@@ -843,6 +850,9 @@ function positionOf(a, source) {
   if (a.anchor.kind === "markdown")
     return (_b = (_a = resolveMarkdown(source, a.anchor)) == null ? void 0 : _a.from) != null ? _b : null;
   if (a.anchor.kind === "pdf") {
+    const region = a.anchor.region;
+    if (region)
+      return region.page * 1e9 + Math.round(1e6 - Math.max(region.rect[1], region.rect[3]));
     const span = a.anchor.spans[0];
     if (!span)
       return null;
@@ -910,6 +920,7 @@ function pdfPlus(app) {
   const view = viewer;
   const layers = lib;
   return {
+    instance: lib,
     selectionIn(pageEl, range) {
       const r = link.getTextSelectionRange(pageEl, range);
       return r ? [r.beginIndex, r.beginOffset, r.endIndex, r.endOffset] : null;
@@ -923,6 +934,33 @@ function pdfPlus(app) {
     },
     onTextLayerReady(child, owner, ready) {
       layers.onTextLayerReady(child.pdfViewer, owner, ready);
+    },
+    onRectSelected(owner, drawn) {
+      const target = copyLink;
+      const original = target.copyEmbedLinkToRect;
+      const own = Object.getOwnPropertyNames(target).includes("copyEmbedLinkToRect");
+      if (typeof original !== "function")
+        return;
+      const wrapped = function(checking, child, page, rect, ...rest) {
+        const result = original.call(this, checking, child, page, rect, ...rest);
+        if (!checking && Array.isArray(rect) && rect.length === 4) {
+          try {
+            drawn(child, page, rect);
+          } catch (e) {
+            console.error("Attention:", e);
+          }
+        }
+        return result;
+      };
+      target.copyEmbedLinkToRect = wrapped;
+      owner.register(() => {
+        if (target.copyEmbedLinkToRect !== wrapped)
+          return;
+        if (own)
+          target.copyEmbedLinkToRect = original;
+        else
+          delete target.copyEmbedLinkToRect;
+      });
     }
   };
 }
@@ -1004,7 +1042,7 @@ function intersect(a, b) {
 }
 
 // src/hosts/markdown/reveal.ts
-async function reveal(app, file, annotation) {
+async function reveal(app, file, annotation, openAs = null) {
   if (annotation.anchor.kind === "transcript") {
     await revealInTranscript(app, file, annotation);
     return;
@@ -1013,7 +1051,7 @@ async function reveal(app, file, annotation) {
     await revealInPdf(app, file, annotation);
     return;
   }
-  await revealInMarkdown(app, file, annotation);
+  await revealInMarkdown(app, file, annotation, openAs);
 }
 async function revealInTranscript(app, file, annotation) {
   var _a;
@@ -1086,9 +1124,9 @@ function segmentStarts(owner) {
     return Number((_a2 = asEl(raw)) == null ? void 0 : _a2.dataset.mtStart);
   }).filter((n) => Number.isFinite(n));
 }
-async function revealInMarkdown(app, file, annotation) {
+async function revealInMarkdown(app, file, annotation, openAs) {
   const line = await lineOfMark(app, file, annotation);
-  const view = await showNote(app, file, line);
+  const view = await showNote(app, file, line, openAs);
   if (!view)
     return;
   if (view.getMode() === "source") {
@@ -1121,21 +1159,23 @@ async function revealInMarkdown(app, file, annotation) {
     }
   );
 }
-async function showNote(app, file, line) {
+async function showNote(app, file, line, openAs) {
   const open = app.workspace.getLeavesOfType("markdown").find((leaf2) => leaf2.view instanceof import_obsidian4.MarkdownView && leaf2.view.file === file);
   if (open) {
     app.workspace.setActiveLeaf(open, { focus: true });
     return open.view instanceof import_obsidian4.MarkdownView ? open.view : null;
   }
   const leaf = app.workspace.getLeaf(false);
-  await leaf.openFile(file, line === null ? void 0 : { eState: { scroll: line } });
+  await leaf.openFile(file, {
+    ...openAs ? { state: { mode: openAs.mode, source: openAs.source } } : {},
+    ...line === null ? {} : { eState: { scroll: line } }
+  });
   return leaf.view instanceof import_obsidian4.MarkdownView ? leaf.view : null;
 }
 async function revealInPdf(app, file, annotation) {
-  var _a, _b;
   if (annotation.anchor.kind !== "pdf")
     return;
-  const page = (_b = (_a = annotation.anchor.spans[0]) == null ? void 0 : _a.page) != null ? _b : 1;
+  const page = pdfPage(annotation.anchor);
   let leaf = app.workspace.getLeavesOfType("pdf").find((l) => l.view.file === file);
   if (leaf) {
     app.workspace.setActiveLeaf(leaf, { focus: true });
@@ -1145,8 +1185,8 @@ async function revealInPdf(app, file, annotation) {
   }
   const view = leaf.view;
   await showMark(view.containerEl, annotation.id, ".page", ".pdf-viewer-container", () => {
-    var _a2, _b2;
-    (_b2 = (_a2 = childOf(view)) == null ? void 0 : _a2.pdfViewer.pdfViewer) == null ? void 0 : _b2.scrollPageIntoView({ pageNumber: page });
+    var _a, _b;
+    (_b = (_a = childOf(view)) == null ? void 0 : _a.pdfViewer.pdfViewer) == null ? void 0 : _b.scrollPageIntoView({ pageNumber: page });
   });
 }
 async function lineOfMark(app, file, annotation) {
@@ -1381,7 +1421,8 @@ function describeMark(annotation, options) {
   var _a;
   const { anchor } = annotation;
   const lines = [];
-  for (const line of readable(anchor.quote).split("\n"))
+  const quote = readable(anchor.quote) || (anchor.kind === "pdf" && anchor.region ? `(a region of page ${anchor.region.page})` : "");
+  for (const line of quote.split("\n"))
     lines.push(`> ${line}`);
   if (isComment(annotation)) {
     lines.push("");
@@ -1393,8 +1434,8 @@ function describeMark(annotation, options) {
   if (anchor.kind === "transcript" && options.clock) {
     lines.push(`At: ${options.clock(anchor.start)}`);
   }
-  if (anchor.kind === "pdf" && anchor.spans.length > 0) {
-    const pages = [...new Set(anchor.spans.map((s) => s.page))];
+  if (anchor.kind === "pdf") {
+    const pages = anchor.region ? [anchor.region.page] : [...new Set(anchor.spans.map((s) => s.page))];
     lines.push(pages.length === 1 ? `Page: ${pages[0]}` : `Pages: ${pages[0]}\u2013${pages[pages.length - 1]}`);
   }
   const times = annotation.hits.map(options.when);
@@ -1658,11 +1699,19 @@ var ReviewView = class extends import_obsidian6.ItemView {
     root.createDiv("at-empty").setText(message);
   }
   renderEntry(root, annotation, targetPath, lost = false, fromEmbed = false) {
-    var _a, _b, _c, _d;
+    var _a, _b;
     const el = root.createDiv("at-entry");
     if (lost)
       el.addClass("at-entry-lost");
-    if (isImageQuote(annotation.anchor.quote)) {
+    const anchor = annotation.anchor;
+    if (anchor.kind === "pdf" && anchor.region) {
+      const { page, rect } = anchor.region;
+      const thumb = el.createDiv("at-thumb at-thumb-pdf");
+      const embed = `![[${targetPath}#page=${page}&rect=${rect.map((v) => Math.round(v)).join(",")}]]`;
+      void import_obsidian6.MarkdownRenderer.render(this.app, embed, thumb, targetPath, this);
+      if (anchor.quote)
+        el.createDiv("at-quote at-quote-region").setText(readable(anchor.quote));
+    } else if (isImageQuote(annotation.anchor.quote)) {
       const thumb = el.createDiv("at-thumb");
       void import_obsidian6.MarkdownRenderer.render(this.app, annotation.anchor.quote, thumb, targetPath, this);
     } else {
@@ -1682,7 +1731,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
       left.createSpan({ text: fmtTime(annotation.anchor.start), cls: "at-time" });
     }
     if (annotation.anchor.kind === "pdf") {
-      left.createSpan({ text: `p. ${(_d = (_c = annotation.anchor.spans[0]) == null ? void 0 : _c.page) != null ? _d : "?"}`, cls: "at-time" });
+      left.createSpan({ text: `p. ${pdfPage(annotation.anchor)}`, cls: "at-time" });
     }
     const right = meta.createDiv("at-meta-right");
     if (annotation.hits.length > 1) {
@@ -1832,7 +1881,7 @@ var ReviewView = class extends import_obsidian6.ItemView {
     const file = this.app.vault.getAbstractFileByPath(targetPath);
     if (!(file instanceof import_obsidian6.TFile))
       return;
-    await reveal(this.app, file, annotation);
+    await reveal(this.app, file, annotation, this.plugin.openModeFor(file));
     await this.plugin.markReviewed({ targetPath, annotation });
   }
 };
@@ -3228,6 +3277,7 @@ function annotationDecorations(provider) {
   return import_view.ViewPlugin.fromClass(
     class {
       constructor(view) {
+        this.painting = [];
         this.decorations = build(view, provider);
       }
       update(u) {
@@ -3238,7 +3288,29 @@ function annotationDecorations(provider) {
           reportEdit(u);
         if (u.docChanged || u.viewportChanged || refreshed) {
           this.decorations = build(u.view, provider);
+          this.paintWidgetsSoon(u.view);
         }
+      }
+      /**
+       * Widgets come and go with the viewport: scrolling down builds the
+       * picture or table that was out of range, and it is built without any
+       * mark on it. Paint this editor's widgets once the update has drawn them,
+       * and again a moment later — Obsidian fills an embed in after building
+       * it. Painting is idempotent, so the second pass costs next to nothing.
+       */
+      paintWidgetsSoon(view) {
+        for (const t of this.painting)
+          window.clearTimeout(t);
+        this.painting = [0, 250].map((delay) => window.setTimeout(() => {
+          var _a, _b;
+          const path = (_b = (_a = view.state.field(import_obsidian10.editorInfoField, false)) == null ? void 0 : _a.file) == null ? void 0 : _b.path;
+          if (path && view.dom.isConnected)
+            paintWidgets(view.contentDOM, path, provider);
+        }, delay));
+      }
+      destroy() {
+        for (const t of this.painting)
+          window.clearTimeout(t);
       }
     },
     { decorations: (v) => v.decorations }
@@ -3275,7 +3347,12 @@ function paintRenderedWidgets(view, provider) {
   const content = asEl(view.contentEl.querySelector(".cm-content"));
   if (!path || !content)
     return;
+  paintWidgets(content, path, provider);
+}
+function paintWidgets(content, path, provider) {
   const annotations = provider(path);
+  if (annotations.length === 0)
+    return;
   paintImages(content, annotations);
   for (const a of annotations) {
     if (a.anchor.kind !== "markdown")
@@ -3904,6 +3981,18 @@ function resolveSpan(items, span, quote, prefix, suffix) {
   });
   return found ? toSelection(items, found.from, found.to) : null;
 }
+function textInRect(items, [x1, y1, x2, y2]) {
+  const inside = items.filter((item) => {
+    var _a, _b;
+    const t = item.transform;
+    if (!item.str.trim() || !t || t.length < 6)
+      return false;
+    const x = t[4] + ((_a = item.width) != null ? _a : 0) / 2;
+    const y = t[5] + ((_b = item.height) != null ? _b : 0) / 2;
+    return x >= Math.min(x1, x2) && x <= Math.max(x1, x2) && y >= Math.min(y1, y2) && y <= Math.max(y1, y2);
+  });
+  return inside.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim();
+}
 
 // src/hosts/pdf/PdfHost.ts
 var PdfHost = class {
@@ -3918,6 +4007,10 @@ var PdfHost = class {
     this.bubble = new CommentBubble();
     /** Where the last right-click in a PDF was, for the menu PDF++ opens after it. */
     this.contextAt = null;
+    /** Where the pointer was last let go in a PDF: where a drawn rectangle ends. */
+    this.releasedAt = null;
+    /** Holds the hook into PDF++'s rectangle tool, and which PDF++ it is in. */
+    this.rectHook = null;
   }
   register() {
     const attach = () => this.attachAll();
@@ -3926,6 +4019,10 @@ var PdfHost = class {
     this.plugin.registerEvent(this.app.workspace.on("file-open", attach));
     this.plugin.register(this.store.onChange((path) => this.repaint(path)));
     this.plugin.register(() => this.detachAll());
+    this.plugin.registerDomEvent(document, "pointerup", (e) => {
+      if (this.inPdf(e.target))
+        this.releasedAt = { x: e.clientX, y: e.clientY };
+    }, { capture: true });
     this.plugin.registerDomEvent(document, "mouseup", (e) => {
       var _a;
       if (e.button !== 0 || !this.settings.popoverOnSelection)
@@ -3980,6 +4077,7 @@ var PdfHost = class {
     }
     if (!lib)
       return;
+    this.hookRectangles(lib);
     for (const [child, path] of open) {
       if (this.painters.has(child))
         continue;
@@ -4005,13 +4103,17 @@ var PdfHost = class {
     this.attachAll();
   }
   detachAll() {
+    var _a;
     for (const { owner } of this.painters.values())
       owner.unload();
     this.painters.clear();
+    (_a = this.rectHook) == null ? void 0 : _a.owner.unload();
+    this.rectHook = null;
     document.querySelectorAll(".at-pdf-hl").forEach((el) => el.remove());
   }
   /** Draw this page's marks, replacing whatever was drawn for it before. */
   paintPage(path, page, view) {
+    var _a;
     const lib = pdfPlus(this.app);
     view.div.querySelectorAll(".at-pdf-hl").forEach((el) => el.remove());
     const info = textLayerOf(view);
@@ -4022,6 +4124,12 @@ var PdfHost = class {
       if (a.anchor.kind !== "pdf")
         continue;
       const anchor = a.anchor;
+      const cls = isComment(a) ? " at-hl-comment" : "";
+      if (((_a = anchor.region) == null ? void 0 : _a.page) === page) {
+        const el = lib.place(anchor.region.rect, view);
+        el.className = "at-hl at-pdf-hl at-pdf-region" + cls;
+        el.dataset.atId = a.id;
+      }
       anchor.spans.forEach((span, k) => {
         if (span.page !== page)
           return;
@@ -4030,7 +4138,7 @@ var PdfHost = class {
           return;
         for (const rect of lib.rects(info, selection)) {
           const el = lib.place(rect, view);
-          el.className = isComment(a) ? "at-hl at-pdf-hl at-hl-comment" : "at-hl at-pdf-hl";
+          el.className = "at-hl at-pdf-hl" + cls;
           el.dataset.atId = a.id;
         }
       });
@@ -4146,6 +4254,54 @@ var PdfHost = class {
     }
     return part.collapsed ? null : part;
   }
+  /** Offer to mark what PDF++'s rectangle tool draws, in whichever PDF++ is loaded now. */
+  hookRectangles(lib) {
+    var _a, _b;
+    if (((_a = this.rectHook) == null ? void 0 : _a.instance) === lib.instance)
+      return;
+    (_b = this.rectHook) == null ? void 0 : _b.owner.unload();
+    const owner = new import_obsidian13.Component();
+    owner.load();
+    lib.onRectSelected(owner, (child, page, rect) => this.onRectangle(child, page, rect));
+    this.rectHook = { owner, instance: lib.instance };
+  }
+  /**
+   * A rectangle was drawn over a page — usually a figure, which has no text to
+   * select. PDF++ has already copied its link; offer to mark it as well, where
+   * the drag ended.
+   */
+  onRectangle(child, page, rect) {
+    var _a, _b, _c;
+    const file = this.fileOf(child);
+    if (!file)
+      return;
+    const view = child.getPage(page);
+    const items = (_b = view && ((_a = textLayerOf(view)) == null ? void 0 : _a.textContentItems)) != null ? _b : [];
+    const anchor = {
+      kind: "pdf",
+      spans: [],
+      region: { page, rect: rect.map((v) => Math.round(v * 100) / 100) },
+      quote: textInRect(items, rect),
+      prefix: "",
+      suffix: ""
+    };
+    const at = (_c = this.releasedAt) != null ? _c : { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    this.popover.showAt(new DOMRect(at.x, at.y, 0, 0), {
+      onMark: () => {
+        void this.mark(file, anchor, null);
+      },
+      onComment: () => this.comment(file, anchor)
+    });
+  }
+  /** The file an open PDF viewer is showing. */
+  fileOf(child) {
+    for (const leaf of this.app.workspace.getLeavesOfType("pdf")) {
+      const view = leaf.view;
+      if (childOf(view) === child)
+        return view.file;
+    }
+    return null;
+  }
   async onSelectionMade() {
     const captured = this.capture();
     if (!captured)
@@ -4218,7 +4374,7 @@ var PdfHost = class {
     });
   }
   comment(file, anchor) {
-    new CommentModal(this.app, readable(anchor.quote), "", (body) => {
+    new CommentModal(this.app, quoteOf(anchor), "", (body) => {
       void this.mark(file, anchor, body || null);
     }).open();
   }
@@ -4227,7 +4383,8 @@ var PdfHost = class {
     const annotation = await this.find(path, id);
     if (!annotation)
       return;
-    new CommentModal(this.app, readable(annotation.anchor.quote), (_a = annotation.body) != null ? _a : "", (body) => {
+    const anchor = annotation.anchor;
+    new CommentModal(this.app, anchor.kind === "pdf" ? quoteOf(anchor) : readable(anchor.quote), (_a = annotation.body) != null ? _a : "", (body) => {
       void this.store.update(path, id, { body: body || null });
     }).open();
   }
@@ -4257,6 +4414,10 @@ function lastText(el) {
   for (let n = walker.nextNode(); n; n = walker.nextNode())
     last = n;
   return last;
+}
+function quoteOf(anchor) {
+  const text = readable(anchor.quote);
+  return text || `Region on page ${pdfPage(anchor)}`;
 }
 
 // src/store/migrateToTrack.ts
@@ -4357,6 +4518,18 @@ var ViewModeHost = class {
           this.apply(file);
       })
     );
+  }
+  /**
+   * The mode `file` will be put in when it opens, or null if it is left alone.
+   *
+   * For opening a note straight into that mode. Opened in another, it is
+   * switched a moment later — and anything that already scrolled the first
+   * view, like jumping to a mark, finds the page replaced underneath it.
+   */
+  modeFor(file) {
+    var _a;
+    const frontmatter = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
+    return resolveViewMode(file.path, frontmatter, this.settings);
   }
   /**
    * Re-apply to every open note.
@@ -4630,6 +4803,11 @@ var AttentionPlugin = class extends import_obsidian15.Plugin {
         view.previewMode.rerender(true);
       }
     }
+  }
+  /** The mode a note is put in when it opens, if a rule says so. */
+  openModeFor(file) {
+    var _a, _b;
+    return (_b = (_a = this.viewModes) == null ? void 0 : _a.modeFor(file)) != null ? _b : null;
   }
   /** Redraw after a setting that only affects how things are shown. */
   refreshPanels() {

@@ -71,9 +71,12 @@ async function probe(code, seconds) {
   return null;
 }
 
-// Obsidian renders nothing in a window it considers hidden, so bring the
-// vault's window to the front.
-execFileSync("open", [`obsidian://open?vault=${encodeURIComponent(vaultName(vault))}`]);
+// The debug build keeps its window drawing while hidden, so the vault only has
+// to be open, not in front: E2E_FOREGROUND=1 brings it forward anyway, for an
+// Obsidian whose Electron won't let a page opt out of being throttled.
+if (process.env.E2E_FOREGROUND === "1") {
+  execFileSync("open", [`obsidian://open?vault=${encodeURIComponent(vaultName(vault))}`]);
+}
 // Wait for this build, not just any: the one already loaded answers too, and
 // a run against it tests code that is no longer there.
 let running = null;
@@ -83,10 +86,13 @@ for (let tries = 0; tries < 20 && running !== build; tries++) {
 }
 if (running !== build) {
   console.error(running === null
-    ? `No answer from Obsidian. Is the vault open?\n  open "obsidian://open?vault=${vaultName(vault)}"`
+    ? `No answer from Obsidian. Is the vault open? If it is, try it in front:\n  E2E_FOREGROUND=1 npm run e2e`
     : "Obsidian is still running an older build. Is Hot Reload installed in the vault?");
   process.exit(2);
 }
+
+const seen = (await probe("return { visibility: document.visibilityState, focused: document.hasFocus() };", 20))?.value;
+if (seen) console.log(`(the window is ${seen.visibility}${seen.focused ? " and focused" : ", not focused"})`);
 
 const fuzz = readFileSync(new URL("./e2e/fuzz.js", import.meta.url), "utf8");
 const result = await probe(`const CONFIG = ${JSON.stringify(config)};\n${fuzz}`, 1800);

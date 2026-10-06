@@ -123,3 +123,30 @@ export function resolveSpan(
   });
   return found ? toSelection(items, found.from, found.to) : null;
 }
+
+/** A text item as pdf.js gives it: where it sits, as well as what it says. */
+export interface PlacedItem {
+  str: string;
+  /** [a, b, c, d, e, f]: e and f are where the item's baseline starts. */
+  transform?: number[];
+  width?: number;
+  height?: number;
+}
+
+/**
+ * The text lying inside a rectangle of the page, in reading order.
+ *
+ * An item counts when its middle is inside — a line clipped by the edge of a
+ * drag belongs to the side most of it is on. Rect and items share the page's
+ * coordinates: PDF units, origin bottom left.
+ */
+export function textInRect(items: readonly PlacedItem[], [x1, y1, x2, y2]: readonly number[]): string {
+  const inside = items.filter(item => {
+    const t = item.transform;
+    if (!item.str.trim() || !t || t.length < 6) return false;
+    const x = t[4] + (item.width ?? 0) / 2;
+    const y = t[5] + (item.height ?? 0) / 2;
+    return x >= Math.min(x1, x2) && x <= Math.max(x1, x2) && y >= Math.min(y1, y2) && y <= Math.max(y1, y2);
+  });
+  return inside.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
+}

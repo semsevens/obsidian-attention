@@ -51,6 +51,9 @@ export async function inDocumentOrder(
 function positionOf(a: Annotation, source: string): number | null {
   if (a.anchor.kind === 'markdown') return resolveMarkdown(source, a.anchor)?.from ?? null;
   if (a.anchor.kind === 'pdf') {
+    // A region sorts by how far down its page it starts: PDF y runs upwards.
+    const region = a.anchor.region;
+    if (region) return region.page * 1e9 + Math.round(1e6 - Math.max(region.rect[1], region.rect[3]));
     const span = a.anchor.spans[0];
     if (!span) return null;
     const [item, offset] = span.selection;

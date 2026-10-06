@@ -82,6 +82,8 @@ export function annotationDecorations(provider: Provider): Extension {
         this.decorations = build(view, provider);
       }
 
+      private painting: number[] = [];
+
       update(u: ViewUpdate) {
         const refreshed = u.transactions.some(t =>
           t.effects.some(e => e.is(refreshAnnotations)),
@@ -89,7 +91,27 @@ export function annotationDecorations(provider: Provider): Extension {
         if (u.docChanged) reportEdit(u);
         if (u.docChanged || u.viewportChanged || refreshed) {
           this.decorations = build(u.view, provider);
+          this.paintWidgetsSoon(u.view);
         }
+      }
+
+      /**
+       * Widgets come and go with the viewport: scrolling down builds the
+       * picture or table that was out of range, and it is built without any
+       * mark on it. Paint this editor's widgets once the update has drawn them,
+       * and again a moment later — Obsidian fills an embed in after building
+       * it. Painting is idempotent, so the second pass costs next to nothing.
+       */
+      private paintWidgetsSoon(view: EditorView): void {
+        for (const t of this.painting) window.clearTimeout(t);
+        this.painting = [0, 250].map(delay => window.setTimeout(() => {
+          const path = view.state.field(editorInfoField, false)?.file?.path;
+          if (path && view.dom.isConnected) paintWidgets(view.contentDOM, path, provider);
+        }, delay));
+      }
+
+      destroy() {
+        for (const t of this.painting) window.clearTimeout(t);
       }
     },
     { decorations: v => v.decorations },
@@ -146,8 +168,13 @@ function paintRenderedWidgets(view: MarkdownView, provider: Provider): void {
   const path = view.file?.path;
   const content = asEl(view.contentEl.querySelector('.cm-content'));
   if (!path || !content) return;
+  paintWidgets(content, path, provider);
+}
 
+/** Paint the marks of `path` onto whatever widgets are drawn in `content`. */
+function paintWidgets(content: HTMLElement, path: string, provider: Provider): void {
   const annotations = provider(path);
+  if (annotations.length === 0) return;
   paintImages(content, annotations);
   for (const a of annotations) {
     if (a.anchor.kind !== 'markdown') continue;

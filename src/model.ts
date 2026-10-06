@@ -64,6 +64,24 @@ export interface PdfSpan {
 export interface PdfAnchor extends QuoteContext {
   kind: 'pdf';
   spans: PdfSpan[];
+  /**
+   * A region of a page instead of a run of text — a figure, a table, a
+   * formula — drawn with PDF++'s rectangle tool. Its `rect` is in the page's
+   * own coordinates, as in a `#page=…&rect=…` link; `spans` is then empty and
+   * the quote holds whatever text lies inside, which may be none.
+   */
+  region?: PdfRegion;
+}
+
+export interface PdfRegion {
+  page: number;
+  /** x1, y1, x2, y2 in PDF units, origin bottom left. */
+  rect: [number, number, number, number];
+}
+
+/** The page a PDF mark starts on. */
+export function pdfPage(anchor: PdfAnchor): number {
+  return anchor.region?.page ?? anchor.spans[0]?.page ?? 1;
 }
 
 export type Anchor = TranscriptAnchor | MarkdownAnchor | PdfAnchor;
@@ -154,6 +172,11 @@ export function sameSpot(a: Anchor, b: Anchor): boolean {
     return a.seg === b.seg || Math.abs(a.start - b.start) < 0.5;
   }
   if (a.kind === 'pdf' && b.kind === 'pdf') {
+    // The same region, give or take the rounding of a drag.
+    if (a.region || b.region) {
+      return !!a.region && !!b.region && a.region.page === b.region.page &&
+        a.region.rect.every((v, i) => Math.abs(v - b.region!.rect[i]) < 1);
+    }
     // The same quote starting at the same place on the same page. A repeated
     // phrase elsewhere on the page starts somewhere else.
     const [x, y] = [a.spans[0], b.spans[0]];

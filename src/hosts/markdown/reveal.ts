@@ -1,6 +1,7 @@
 import { App, FileView, MarkdownView, TFile } from 'obsidian';
 import { childOf } from '../pdf/pdfPlus';
-import { Annotation } from '../../model';
+import type { ViewModeTarget } from '../../viewMode';
+import { Annotation, pdfPage } from '../../model';
 import { resolveMarkdown } from '../../anchor/resolveAnchor';
 import { asEl, asMedia } from '../../dom';
 import { endOfSegment, PLAY_ON } from '../transcript/segmentEnd';
@@ -14,7 +15,12 @@ import { lineOf, lineStarts } from '../../anchor/lines';
  * `data-at-id` stamped on the painted span; a transcript needs the *player*
  * moved, which is the whole point of marking one; a PDF needs its page.
  */
-export async function reveal(app: App, file: TFile, annotation: Annotation): Promise<void> {
+export async function reveal(
+  app: App,
+  file: TFile,
+  annotation: Annotation,
+  openAs: ViewModeTarget | null = null,
+): Promise<void> {
   if (annotation.anchor.kind === 'transcript') {
     await revealInTranscript(app, file, annotation);
     return;
@@ -23,7 +29,7 @@ export async function reveal(app: App, file: TFile, annotation: Annotation): Pro
     await revealInPdf(app, file, annotation);
     return;
   }
-  await revealInMarkdown(app, file, annotation);
+  await revealInMarkdown(app, file, annotation, openAs);
 }
 
 /**
@@ -136,9 +142,10 @@ async function revealInMarkdown(
   app: App,
   file: TFile,
   annotation: Annotation,
+  openAs: ViewModeTarget | null,
 ): Promise<void> {
   const line = await lineOfMark(app, file, annotation);
-  const view = await showNote(app, file, line);
+  const view = await showNote(app, file, line, openAs);
   if (!view) return;
 
   if (view.getMode() === 'source') {
@@ -170,21 +177,33 @@ async function revealInMarkdown(
  * scrolls the view to the mark's line whether or not the mark was already in
  * sight, which is what made a second click on the same record jolt the page.
  *
- * A note that has to be opened is told the line as part of the open. Scrolling
+ * A note that has to be opened is told the line, and the mode it is going to be
+ * in, as part of the open. Scrolling
  * afterwards is too late: the view restores its own position while it sets
  * itself up, and overwrites ours. `scroll`, not `line`: both take the view
  * there, but `line` also flashes the whole block — next to a mark on three
  * words, that reads as the mark itself.
  */
-async function showNote(app: App, file: TFile, line: number | null): Promise<MarkdownView | null> {
+async function showNote(
+  app: App,
+  file: TFile,
+  line: number | null,
+  openAs: ViewModeTarget | null,
+): Promise<MarkdownView | null> {
   const open = app.workspace.getLeavesOfType('markdown')
     .find(leaf => leaf.view instanceof MarkdownView && leaf.view.file === file);
   if (open) {
     app.workspace.setActiveLeaf(open, { focus: true });
     return open.view instanceof MarkdownView ? open.view : null;
   }
+  // In the mode it will be switched to anyway, if it will be: a note opened in
+  // one mode and put in another a moment later replaces the view this has
+  // just scrolled and flashed, and the mark ends up wherever the new view lands.
   const leaf = app.workspace.getLeaf(false);
-  await leaf.openFile(file, line === null ? undefined : { eState: { scroll: line } });
+  await leaf.openFile(file, {
+    ...(openAs ? { state: { mode: openAs.mode, source: openAs.source } } : {}),
+    ...(line === null ? {} : { eState: { scroll: line } }),
+  });
   return leaf.view instanceof MarkdownView ? leaf.view : null;
 }
 
@@ -196,7 +215,7 @@ async function showNote(app: App, file: TFile, line: number | null): Promise<Mar
  */
 async function revealInPdf(app: App, file: TFile, annotation: Annotation): Promise<void> {
   if (annotation.anchor.kind !== 'pdf') return;
-  const page = annotation.anchor.spans[0]?.page ?? 1;
+  const page = pdfPage(annotation.anchor);
 
   let leaf = app.workspace.getLeavesOfType('pdf').find(l => (l.view as FileView).file === file);
   if (leaf) {

@@ -1,14 +1,14 @@
 import { App, Component, Events, FileView, Menu, Notice, Plugin, TFile } from 'obsidian';
-import { Annotation, isComment, PdfAnchor, PdfSpan } from '../../model';
+import { Annotation, isComment, PdfAnchor, pdfPage, PdfSpan } from '../../model';
 import { AnnotationStore } from '../../store/annotationStore';
 import { AttentionSettings } from '../../settings';
 import { SelectionPopover } from '../../ui/SelectionPopover';
 import { CommentBubble } from '../../ui/CommentBubble';
 import { CommentModal } from '../../ui/CommentModal';
 import { asEl, elementOf } from '../../dom';
-import { describePdf, resolveSpan, spanText } from '../../anchor/pdfText';
+import { describePdf, resolveSpan, spanText, textInRect } from '../../anchor/pdfText';
 import { readable } from '../../anchor/cjk';
-import { childOf, PageView, PdfChild, pdfPlus, textLayerOf, TextLayerInfo } from './pdfPlus';
+import { childOf, PageView, PdfChild, PdfPlus, pdfPlus, Rect, textLayerOf, TextLayerInfo } from './pdfPlus';
 
 /**
  * Marks on PDFs, drawn and selected through PDF++.
@@ -23,6 +23,10 @@ export class PdfHost {
   private bubble = new CommentBubble();
   /** Where the last right-click in a PDF was, for the menu PDF++ opens after it. */
   private contextAt: { x: number; y: number } | null = null;
+  /** Where the pointer was last let go in a PDF: where a drawn rectangle ends. */
+  private releasedAt: { x: number; y: number } | null = null;
+  /** Holds the hook into PDF++'s rectangle tool, and which PDF++ it is in. */
+  private rectHook: { owner: Component; instance: object } | null = null;
 
   constructor(
     private app: App,
@@ -38,6 +42,10 @@ export class PdfHost {
     this.plugin.registerEvent(this.app.workspace.on('file-open', attach));
     this.plugin.register(this.store.onChange(path => this.repaint(path)));
     this.plugin.register(() => this.detachAll());
+
+    this.plugin.registerDomEvent(document, 'pointerup', e => {
+      if (this.inPdf(e.target)) this.releasedAt = { x: e.clientX, y: e.clientY };
+    }, { capture: true });
 
     this.plugin.registerDomEvent(document, 'mouseup', e => {
       if (e.button !== 0 || !this.settings.popoverOnSelection) return;
@@ -92,6 +100,7 @@ export class PdfHost {
       }
     }
     if (!lib) return;
+    this.hookRectangles(lib);
 
     for (const [child, path] of open) {
       if (this.painters.has(child)) continue;
@@ -121,6 +130,8 @@ export class PdfHost {
   private detachAll(): void {
     for (const { owner } of this.painters.values()) owner.unload();
     this.painters.clear();
+    this.rectHook?.owner.unload();
+    this.rectHook = null;
     document.querySelectorAll('.at-pdf-hl').forEach(el => el.remove());
   }
 
@@ -135,6 +146,12 @@ export class PdfHost {
     for (const a of this.store.peek(path)) {
       if (a.anchor.kind !== 'pdf') continue;
       const anchor = a.anchor;
+      const cls = isComment(a) ? ' at-hl-comment' : '';
+      if (anchor.region?.page === page) {
+        const el = lib.place(anchor.region.rect, view);
+        el.className = 'at-hl at-pdf-hl at-pdf-region' + cls;
+        el.dataset.atId = a.id;
+      }
       anchor.spans.forEach((span, k) => {
         if (span.page !== page) return;
         const selection = this.locate(items, anchor, k);
@@ -143,7 +160,7 @@ export class PdfHost {
           const el = lib.place(rect, view);
           // Not PDF++'s classes: those carry its own hover and click handling,
           // which looks for a backlink a mark doesn't have.
-          el.className = isComment(a) ? 'at-hl at-pdf-hl at-hl-comment' : 'at-hl at-pdf-hl';
+          el.className = 'at-hl at-pdf-hl' + cls;
           el.dataset.atId = a.id;
         }
       });
@@ -256,6 +273,50 @@ export class PdfHost {
     return part.collapsed ? null : part;
   }
 
+  /** Offer to mark what PDF++'s rectangle tool draws, in whichever PDF++ is loaded now. */
+  private hookRectangles(lib: PdfPlus): void {
+    if (this.rectHook?.instance === lib.instance) return;
+    this.rectHook?.owner.unload();
+    const owner = new Component();
+    owner.load();
+    lib.onRectSelected(owner, (child, page, rect) => this.onRectangle(child, page, rect));
+    this.rectHook = { owner, instance: lib.instance };
+  }
+
+  /**
+   * A rectangle was drawn over a page — usually a figure, which has no text to
+   * select. PDF++ has already copied its link; offer to mark it as well, where
+   * the drag ended.
+   */
+  private onRectangle(child: PdfChild, page: number, rect: Rect): void {
+    const file = this.fileOf(child);
+    if (!file) return;
+    const view = child.getPage(page);
+    const items = (view && textLayerOf(view)?.textContentItems) ?? [];
+    const anchor: PdfAnchor = {
+      kind: 'pdf',
+      spans: [],
+      region: { page, rect: rect.map(v => Math.round(v * 100) / 100) as Rect },
+      quote: textInRect(items, rect),
+      prefix: '',
+      suffix: '',
+    };
+    const at = this.releasedAt ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+    this.popover.showAt(new DOMRect(at.x, at.y, 0, 0), {
+      onMark: () => { void this.mark(file, anchor, null); },
+      onComment: () => this.comment(file, anchor),
+    });
+  }
+
+  /** The file an open PDF viewer is showing. */
+  private fileOf(child: PdfChild): TFile | null {
+    for (const leaf of this.app.workspace.getLeavesOfType('pdf')) {
+      const view = leaf.view as FileView;
+      if (childOf(view) === child) return view.file;
+    }
+    return null;
+  }
+
   private async onSelectionMade(): Promise<void> {
     const captured = this.capture();
     if (!captured) return;
@@ -314,7 +375,7 @@ export class PdfHost {
   }
 
   private comment(file: TFile, anchor: PdfAnchor): void {
-    new CommentModal(this.app, readable(anchor.quote), '', body => {
+    new CommentModal(this.app, quoteOf(anchor), '', body => {
       void this.mark(file, anchor, body || null);
     }).open();
   }
@@ -322,7 +383,8 @@ export class PdfHost {
   private async editComment(path: string, id: string): Promise<void> {
     const annotation = await this.find(path, id);
     if (!annotation) return;
-    new CommentModal(this.app, readable(annotation.anchor.quote), annotation.body ?? '', body => {
+    const anchor = annotation.anchor;
+    new CommentModal(this.app, anchor.kind === 'pdf' ? quoteOf(anchor) : readable(anchor.quote), annotation.body ?? '', body => {
       void this.store.update(path, id, { body: body || null });
     }).open();
   }
@@ -353,4 +415,10 @@ function lastText(el: Node): Text | null {
   let last: Text | null = null;
   for (let n = walker.nextNode(); n; n = walker.nextNode()) last = n as Text;
   return last;
+}
+
+/** What to show of a PDF mark in words: its text, or where a wordless region is. */
+function quoteOf(anchor: PdfAnchor): string {
+  const text = readable(anchor.quote);
+  return text || `Region on page ${pdfPage(anchor)}`;
 }

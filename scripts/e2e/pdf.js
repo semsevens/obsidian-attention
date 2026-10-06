@@ -72,7 +72,7 @@ const waitFor = async (look, ms = 5000) => {
 const made = [];
 try {
   await main.openFile(file);
-  app.workspace.setActiveLeaf(main, { focus: true });
+  app.workspace.setActiveLeaf(main, { focus: false });
   if (!await waitFor(() => textNodes(1).length > 0, 8000)) {
     return { failures: [{ case: 'the PDF never drew its text — is the window in front?' }] };
   }
@@ -139,6 +139,53 @@ try {
   const shown = Array.from(panel.view.containerEl.querySelectorAll('.at-quote')).map(e => e.textContent);
   expect('the panel shows characters, not the radicals the PDF stores',
     shown.includes('注意力是稀缺资源') && !shown.some(t => /[⺀-⿟]/.test(t)), shown);
+
+  // ── A region, drawn with PDF++'s rectangle tool ──────────────────────────
+  // The way a reader marks a figure: turn the tool on, drag over the page.
+  // PDF++ copies the region's link as it always does — the clipboard is put
+  // back afterwards — and Attention offers to mark it.
+  const clipboard = await navigator.clipboard.readText().catch(() => null);
+  try {
+    scroller().scrollTop = 0;
+    await sleep(400);
+    const tool = main.view.containerEl.querySelector('.pdf-plus-rect-select');
+    expect('PDF++ shows its rectangle tool', tool, null);
+    if (tool) {
+      tool.click();
+      const pageEl = main.view.containerEl.querySelector('.page[data-page-number="1"]');
+      const box = pageEl.getBoundingClientRect();
+      const [x1, y1] = [box.left + box.width * 0.08, box.top + box.height * 0.06];
+      const [x2, y2] = [box.left + box.width * 0.75, box.top + box.height * 0.16];
+      const pointer = (type, x, y, on) => on.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse', button: 0, buttons: type === 'pointerup' ? 0 : 1, isPrimary: true,
+      }));
+      pointer('pointerdown', x1, y1, document.elementFromPoint(x1, y1) ?? pageEl);
+      pointer('pointermove', x2, y2, pageEl);
+      pointer('pointerup', x2, y2, pageEl);
+      const markButton = await waitFor(() => document.querySelector('.at-popover .at-pop-mark'), 2000);
+      expect('drawing a rectangle offers to mark it', markButton, null);
+      if (markButton) {
+        markButton.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        const region = await waitFor(() => plugin.store.peek(PATH).find(a => a.anchor.region), 3000);
+        expect('the region is marked, on its page, with the text inside it',
+          region && region.anchor.region.page === 1 && region.anchor.quote.includes('PDF'), region?.anchor);
+        if (region) {
+          made.push(region.id);
+          const drawn = await waitFor(() => main.view.containerEl.querySelector(`.at-pdf-region[data-at-id="${region.id}"]`));
+          const r = drawn?.getBoundingClientRect();
+          // Where PDF++ placed it should be where the drag was, within a few pixels.
+          const near = r && Math.abs(r.left - x1) < 6 && Math.abs(r.top - y1) < 6 && Math.abs(r.right - x2) < 6 && Math.abs(r.bottom - y2) < 6;
+          expect('the region is drawn where it was dragged', near,
+            { drawn: r && [r.left, r.top, r.right, r.bottom].map(Math.round), dragged: [x1, y1, x2, y2].map(Math.round) });
+          await sleep(800);
+          const thumb = await waitFor(() => panel.view.containerEl.querySelector('.at-thumb-pdf canvas, .at-thumb-pdf img'), 5000);
+          expect('the panel shows the region as a picture', thumb, panel.view.containerEl.querySelector('.at-thumb-pdf')?.innerHTML.slice(0, 200));
+        }
+      }
+    }
+  } finally {
+    if (clipboard !== null) await navigator.clipboard.writeText(clipboard).catch(() => {});
+  }
 
   // ── Jumping to a mark ────────────────────────────────────────────────────
   // A mark on the last page, jumped to from the first.

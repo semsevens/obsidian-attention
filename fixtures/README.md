@@ -19,10 +19,18 @@ recordings (`录音/`) are ignored.
 npm run e2e
 ```
 
-builds a debug version of the plugin into the vault, brings its window to the
-front, and has Obsidian make a few thousand random selections across every
-note here, checking each is captured as the source the reader was looking at.
-The vault has to be open. Point it at a real vault to find the next case:
+builds a debug version of the plugin into the vault and has Obsidian make a
+few thousand random selections across every note here, checking each is
+captured as the source the reader was looking at; then jumps to marks — on
+words and on a picture — from the review panel, and marks a PDF through PDF++.
+
+The vault has to be open, but not in front: the debug build keeps its window
+drawing in the background and stops it from ever coming forward, so you can
+go on reading another vault while it runs. Nothing moves the real mouse. The
+one thing it borrows is the clipboard: PDF++ copies a link when the rectangle
+test draws on a PDF, and the test puts your clipboard text back afterwards.
+`E2E_FOREGROUND=1` brings the window forward first, for when it won't run in
+the background. Point it at a real vault to find the next case:
 
 ```bash
 E2E_VAULT=~/Desktop/ob/me E2E_FOLDER=raw/in E2E_NOTES=12 npm run e2e
@@ -47,7 +55,7 @@ Each one exists for a case that has broken at least once:
 | `图片.md` | frontmatter, then: an image directly under the fence, one sharing its line with a caption, one alone on its line, the same remote image twice, and a very long URL |
 | `图片宿主.md` | transcludes the above — an image marked inside it belongs to `图片.md`, whose source has the embed |
 | `代码与列表.md` | marks in a code block, a list, a quote, and across inline markup |
-| `很长的笔记.md` | long enough that reading mode has not rendered the end of it — a mark there is not in the document until something scrolls to it |
+| `很长的笔记.md` | long enough that reading mode has not rendered the end of it — a mark there is not in the document until something scrolls to it. Near the end, a picture: jumping to a mark on it must find the picture, and a picture the editor draws only once scrolled to must still show its mark |
 | `混排与表情.md` | Chinese, English and emoji on one line: offsets are UTF-16 code units, and an emoji is more than one |
 | `同名媒体.md` | a reminder that `x.mp4` and `x.m4a` get a sidecar each |
 | `选区-记号.md` | everything the screen draws differently from the source: `<sup>` footnote markers, `snake_case` in and out of code, fenced code, backslash escapes, `****literal asterisks****`, list, task and quote markers, math, a table, entities, an autolink |

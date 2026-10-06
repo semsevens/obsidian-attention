@@ -18,10 +18,51 @@ import AttentionPlugin from "../../src/main";
 export default class DebugAttentionPlugin extends AttentionPlugin {
   async onload() {
     await super.onload();
+    // Chromium stops drawing a window that is hidden, covered or minimised,
+    // and slows its timers to a crawl — so the tests could only run with the
+    // dev vault in front of whatever the person was doing. A debug build asks
+    // its own window to keep going in the background instead.
+    this.keepRunningInBackground(true);
+    this.register(() => this.keepRunningInBackground(false));
     // Which build is running: Hot Reload swaps it in a moment after it lands,
     // and a test must not mistake the old one for it.
     this.debugBuild = ATTENTION_BUILD;
     this.registerInterval(window.setInterval(() => { void this.runProbe(); }, 300));
+  }
+
+  /**
+   * Keep drawing while hidden, and never come forward.
+   *
+   * The tests drive the plugin's real code, and that code focuses what it
+   * opens — right for a reader, but when Obsidian is the app in front, focusing
+   * the dev vault's window raises it over whatever vault the person is reading.
+   * So while a debug build is loaded, its window can't be raised or focused.
+   */
+  keepRunningInBackground(on) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- electron is only reachable through require inside Obsidian
+      const { remote } = require("electron");
+      remote?.getCurrentWebContents()?.setBackgroundThrottling(!on);
+      // Obsidian raises a window through its own handle, `window.electronWindow`
+      // (restore, then focus), whenever a tab in it is activated with focus
+      // and the window doesn't have it. Every handle to this window is covered.
+      const handles = [window.electronWindow, remote?.getCurrentWindow(), window];
+      for (const target of handles) {
+        if (!target) continue;
+        for (const name of ["focus", "show", "moveTop", "restore"]) {
+          if (typeof target[name] !== "function") continue;
+          if (on) {
+            this.restorers ??= [];
+            const original = target[name];
+            target[name] = () => {};
+            this.restorers.push(() => { target[name] = original; });
+          }
+        }
+      }
+      if (!on) for (const restore of this.restorers ?? []) restore();
+    } catch {
+      // Not in Electron, or no remote: the tests need the window in front.
+    }
   }
 
   async runProbe() {

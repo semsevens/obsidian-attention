@@ -70,7 +70,7 @@ const leaf = app.workspace.getLeaf('tab');
 const report = [];
 try {
   for (const file of picks) {
-    await leaf.openFile(file, { state: { mode: 'preview' }, active: true });
+    await leaf.openFile(file, { state: { mode: 'preview' } });
     const view = leaf.view;
     // The reading layer by name: the first `.markdown-preview-view` under
     // `contentEl` can be a transclusion the editor layer drew.
