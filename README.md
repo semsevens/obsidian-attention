@@ -2,7 +2,7 @@
 
 Record where your attention went — then run into it again.
 
-Highlight and comment on **notes, transcripts and subtitles**, and revisit what you
+Highlight and comment on **notes, PDFs, transcripts and subtitles**, and revisit what you
 marked. Annotations live in a sidecar file next to the original; **the original file
 is never modified**.
 
@@ -129,6 +129,16 @@ seeks the player and plays.
 Transcript marks belong to the media file rather than to a subtitle track, and
 are re-found by timestamp and quote, so re-transcribing with a different engine
 doesn't orphan them.
+
+PDFs, when [PDF++](https://github.com/RyotaUshio/obsidian-pdf-plus) is
+installed: select text and **Mark** or 💬 it, or use PDF++'s right-click menu,
+which gains Attention's items. A figure, a table or a formula has no text to
+select — draw over it with PDF++'s rectangle tool, and it can be marked too; the
+panel shows the region itself. PDF++ does the selecting and drawing, so marks sit
+exactly where its own highlights would at any zoom; Attention keeps its record in
+`x.pdf.anno.json`, and the PDF is never modified. Many PDFs store Chinese as
+look-alike radicals (`⼒` for 力); quotes are shown, copied and searched as the
+ordinary characters.
 
 See [`docs/architecture.md`](docs/architecture.md) for the design and what's
 still open.
